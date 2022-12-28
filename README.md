@@ -1,5 +1,5 @@
 # Password spraying O365 with IP rotation (nordvpn)
-Password spraying O365 with IP rotation (nordvpn) every 15 attemps
+Password spraying O365 with IP rotation (nordvpn) every 15 attempts
 
 ## Prerequisites
 
