@@ -16,5 +16,5 @@ pip3 install -r requirements.txt
 ### Usage
 
 ```bash
-sudo python3 MSOLSpray.py -u '<path/to/mail/file>' -p '<pass>' --vpn -o result.txt
+sudo python3 MSOLSpray.py -u '<path/to/mail/file>' -p '<pass>' --vpn -o result.txt -s 2
 ```
