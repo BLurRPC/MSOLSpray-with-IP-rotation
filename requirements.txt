@@ -1,2 +1,5 @@
 nordvpn-switcher
 requests
+argparse
+colorlog
+requests_ntlm
