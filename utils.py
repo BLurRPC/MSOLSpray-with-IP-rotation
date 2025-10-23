@@ -16,11 +16,6 @@ LOGGER = None
 
 
 def configure_logger(verbose=False, logfile_prefix="ADFSpray"):
-    """
-    Configure et retourne un logger 'ADFSpray'.
-    Installe aussi le logger dans utils.LOGGER pour que les fonctions du module
-    puissent utiliser LOGGER directement.
-    """
     global LOGGER
     LOGGER = logging.getLogger("ADFSpray")
 
