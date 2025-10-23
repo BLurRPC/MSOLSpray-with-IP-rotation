@@ -6,7 +6,7 @@ Password spraying O365/ADFS with IP rotation (nordvpn) every 15 attempts
 * Nordvpn client (tested on debian)
 * Connect to nordvpn
 ```bash
-sudo nordvpn login --username '<mail>' --password '<pass>'
+sudo nordvpn login
 ```
 * Python packages
 ```bash

