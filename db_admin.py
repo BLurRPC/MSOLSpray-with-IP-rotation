@@ -1,38 +1,8 @@
-#!/usr/bin/env python3
-"""
-db_admin.py
-Petit utilitaire CLI pour interagir avec la base locale d'événements.
-
-Exemples d'utilisation :
-
-1. Initialiser/créer la DB (si pas déjà faite)
-   python db_admin.py --init
-
-2. Lister les 20 derniers "success"
-   python db_admin.py --list-success --limit 20
-
-3. Lister les "fail"
-   python db_admin.py --list-fail
-
-4. Affiche les utilisateurs qui existent (MSOL uniquement)
-   python db_admin.py --print-valid-users   
-
-5. Requête filtrée :
-   python db_admin.py --query --subject alice@example.com --status success --limit 10
-
-6. Export CSV :
-   python db_admin.py --export out.csv --limit 500
-
-7 Purge des événements de plus de 60 jours :
-   python db_admin.py --purge 60
-"""
-
 import argparse
 import datetime
 import sys
 from typing import Optional
 
-# On réutilise la DB et le logger définis dans utils.py
 from utils import (
     configure_logger,
     init_db,
@@ -43,8 +13,6 @@ from utils import (
     export_csv,
     purge_older_than,
 )
-
-# On n'importe pas LOGGER directement, on laisse configure_logger() créer le logger.
 
 
 def parse_args():
@@ -209,7 +177,6 @@ def main():
     args = parse_args()
     print(args)
 
-    # Initialise le logger le plus tôt possible
     LOGGER = configure_logger(verbose=args.verbose, logfile_prefix="DBADMIN")
 
     # Init DB (toujours) pour avoir une session, puis on agira selon les flags
