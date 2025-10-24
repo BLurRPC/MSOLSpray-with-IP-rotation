@@ -3,3 +3,5 @@ requests
 argparse
 colorlog
 requests_ntlm
+sqlalchemy
+csv

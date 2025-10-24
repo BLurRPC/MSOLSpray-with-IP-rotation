@@ -1,5 +1,6 @@
 __pycache__
-settings_nordvpn.txt
-users.txt
+*.txt
+!requirements.txt
 *.csv
 *.log
+*.db
