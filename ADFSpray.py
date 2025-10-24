@@ -11,7 +11,7 @@ import urllib.parse
 import requests
 from random import randint
 from nordvpn_switcher import initialize_VPN,terminate_VPN
-from utils import configure_logger, safe_rotate_vpn, get_public_ip, excptn, init_db, log_event
+from utils import configure_logger, safe_rotate_vpn, get_public_ip, excptn, init_db, log_event, has_user_password_been_tested
 from requests.packages.urllib3.exceptions import InsecureRequestWarning, TimeoutError
 from requests_ntlm import HttpNtlmAuth
 
@@ -57,6 +57,7 @@ def args_parse():
                                                 "attempts", action="store_true", default=False)
     
     parser.add_argument("--vpn", action=argparse.BooleanOptionalAction, help="Use nord vpn to rotate IP")
+    parser.add_argument('--skip-tested', action='store_true', help="Skip user:password already tried and logged in the DB")
     return parser.parse_args()
 
 
@@ -166,7 +167,7 @@ def autodiscover_attempts(users, passes, targets, sleep_time, random, min_sleep,
         excptn(e)
 
 
-def adfs_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sleep, verbose, vpn, initial_ip=None):
+def adfs_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sleep, vpn, initial_ip, skip_tested):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
     username_counter = 0
     prev_ip = initial_ip
@@ -176,6 +177,16 @@ def adfs_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sle
         for target in targets:  # checking each target separately
             for password in passes:  # trying one password against each user, less likely to lockout users
                 for username in users:
+                    if skip_tested:
+                        try:
+                            already = has_user_password_been_tested(username, password)
+                        except Exception as e:
+                            LOGGER.warning(f"[DB] Error during the user:password check: {e}")
+                            already = False  # en cas d'erreur, on choisit de ne pas bloquer le flux
+                        if already:
+                            LOGGER.info(f"[SKIP] {username}:{password} already tested — skipping.")
+                            continue  # passe au suivant
+
                     if vpn and username_counter % 15 == 0:
                         new_ip = safe_rotate_vpn(prev_ip=prev_ip, rotate_retries=4)
                         if new_ip:
@@ -313,7 +324,7 @@ def main():
     elif args.method == 'adfs':
         LOGGER.info("[*] You chose %s method" % args.method)
         adfs_attempts(usernames_stripped, passwords_stripped, targets_stripped,
-                      args.sleep, random, min_sleep, max_sleep, args.verbose, vpn, initial_ip=initial_ip)
+                      args.sleep, random, min_sleep, max_sleep, vpn, initial_ip, args.skip_tested)
 
     elif args.method == 'basicauth':
         LOGGER.info("[*] You chose %s method" % args.method)

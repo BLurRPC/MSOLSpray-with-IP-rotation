@@ -355,3 +355,21 @@ def _row_to_dict(row: Event) -> Dict[str, Any]:
         "details": row.details,
         "run_id": row.run_id,
     }
+
+def has_user_password_been_tested(username: str, password: str) -> bool:
+    """
+    Retourne True si on trouve au moins une ligne où:
+      - Event.subject == username
+    ET
+      - (Event.target == password)
+    """
+    if not username or not password:
+        return False
+    session = get_session()
+    try:
+        q = session.query(Event).filter(
+            Event.subject == username, Event.password == password        
+        ).limit(1)
+        return q.count() > 0
+    finally:
+        session.close()
