@@ -70,8 +70,8 @@ sudo python3 db_admin.py --purge 60
 ```
 
 # Roadmap
-- Adding countries for NordVPN as an option
+- Adding countries for NordVPN as an option ✅
 - Adding local DB as an option to:
-    - Skip users with a known password
-    - Skip users when the password tried has already been tried before
+    - Skip users with a known password ✅
+    - Skip users when the password tried has already been tried before ✅
 - Add an option for user:password wordlists (leaks)
