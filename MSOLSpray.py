@@ -32,6 +32,7 @@ parser.add_argument("--vpn", action=argparse.BooleanOptionalAction, help="Use no
 parser.add_argument("--userAsPass", action=argparse.BooleanOptionalAction, help="Use username as password")
 parser.add_argument('--skip-tested', action='store_true', help="Skip user:password already tried and logged in the DB")
 parser.add_argument('--ignore-success', action='store_true', help="Skip user already pwned in the DB")
+parser.add_argument("--vpn-area", default="Europe", help="VPN Zone(s) to use (ex: --vpn-area France,Germany,Netherlands,United Kingdom). Défaut: Europe.")
 
 args = parser.parse_args()
 
@@ -40,7 +41,6 @@ url = args.url
 force = args.force
 verbose = args.verbose
 sleep = args.sleep
-vpn = args.vpn
 userAsPass = args.userAsPass
 
 usernames = []
@@ -60,9 +60,11 @@ username_counter = 0
 lockout_counter = 0
 lockout_question = False
 
-if vpn:
+if args.vpn:
         try:
-            initialize_VPN(save=1, area_input=['France,Germany,Netherlands,United Kingdom'])
+            area = args.vpn_area or "Europe"
+            initialize_VPN(save=1, area_input=[area])
+            LOGGER.debug(f"[VPN] initialized VPN on: {area} region(s)")
         except Exception as e:
             LOGGER.warning(f"[VPN] initialize_VPN failed at start: {e}")
 
@@ -102,8 +104,8 @@ for username in usernames:
     if username_counter>0 and sleep>0:        
         time.sleep(sleep)
     
-    if vpn and username_counter%15==0:
-        new_ip = safe_rotate_vpn(prev_ip=prev_ip, rotate_retries=4)
+    if args.vpn and username_counter%15==0:
+        new_ip = safe_rotate_vpn(args.vpn_area, prev_ip=prev_ip, rotate_retries=4)
         if new_ip:
             prev_ip = new_ip
             LOGGER.debug(f"[VPN] Using IP {prev_ip}")
@@ -215,5 +217,5 @@ for username in usernames:
 
         # else: continue even though lockout is detected
 
-if vpn:
+if args.vpn:
     terminate_VPN()

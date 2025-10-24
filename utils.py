@@ -69,21 +69,21 @@ def get_public_ip(url="https://ifconfig.me", timeout=5, retries=2):
             if resp.status_code == 200:
                 ip = resp.text.strip()
                 if LOGGER:
-                    LOGGER.debug(f"[VPN] get_public_ip success (attempt {attempt}): {ip}")
+                    LOGGER.debug(f"[IP] get_public_ip success (attempt {attempt}): {ip}")
                 return ip
             else:
                 if LOGGER:
-                    LOGGER.debug(f"[VPN] get_public_ip non-200 status {resp.status_code}")
+                    LOGGER.debug(f"[IP] get_public_ip non-200 status {resp.status_code}")
         except (RequestException, socket.timeout, Exception) as e:
             if LOGGER:
-                LOGGER.debug(f"[VPN] get_public_ip attempt {attempt} failed: {e}")
+                LOGGER.debug(f"[IP] get_public_ip attempt {attempt} failed: {e}")
             time.sleep(1)
     if LOGGER:
-        LOGGER.debug("[VPN] get_public_ip failed after retries")
+        LOGGER.debug("[IP] get_public_ip failed after retries")
     return None
 
 
-def safe_rotate_vpn(prev_ip=None, rotate_retries=3, wait_initial=2, ip_check_timeout=5):
+def safe_rotate_vpn(area, prev_ip=None, rotate_retries=3, wait_initial=2, ip_check_timeout=5):
     """
     Tente de faire rotate_VPN() et s'assure autant que possible que l'IP publique a changé.
     Retourne la nouvelle IP (string) ou None si échec.
@@ -129,7 +129,7 @@ def safe_rotate_vpn(prev_ip=None, rotate_retries=3, wait_initial=2, ip_check_tim
         terminate_VPN()
         time.sleep(2)
         # NOTE: area_input expects a list; original string left as user provided
-        initialize_VPN(save=1, area_input=['France,Germany,Netherlands,United Kingdom'])
+        initialize_VPN(save=1, area_input=[area])
         time.sleep(4)
         new_ip = get_public_ip(timeout=ip_check_timeout, retries=2)
         if new_ip and prev_ip and new_ip != prev_ip:
