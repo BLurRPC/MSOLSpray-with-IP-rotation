@@ -368,7 +368,25 @@ def has_user_password_been_tested(username: str, password: str) -> bool:
     session = get_session()
     try:
         q = session.query(Event).filter(
-            Event.subject == username, Event.password == password        
+            Event.subject == username, Event.password == password
+        ).limit(1)
+        return q.count() > 0
+    finally:
+        session.close()
+
+def has_user_been_pwned(username: str) -> bool:
+    """
+    Retourne True si on trouve au moins une ligne où:
+      - Event.subject == username
+    ET
+      - (Event.status == "success")
+    """
+    if not username:
+        return False
+    session = get_session()
+    try:
+        q = session.query(Event).filter(
+            Event.subject == username, Event.status == "success"
         ).limit(1)
         return q.count() > 0
     finally:
