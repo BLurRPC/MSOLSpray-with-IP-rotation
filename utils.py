@@ -315,7 +315,7 @@ def export_csv(path: str = "events_export.csv", rows: Optional[List[Dict[str, An
         if rows is None:
             q = session.query(Event).order_by(Event.timestamp.desc()).limit(query_limit)
             rows = [_row_to_dict(r) for r in q.all()]
-        fieldnames = ["id", "timestamp", "subject", "target", "status", "ip", "details", "run_id"]
+        fieldnames = ["id", "timestamp", "subject", "password", "target", "status", "ip", "details", "run_id"]
         with open(path, "w", newline='', encoding='utf-8') as fh:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
@@ -349,6 +349,7 @@ def _row_to_dict(row: Event) -> Dict[str, Any]:
         "id": row.id,
         "timestamp": row.timestamp.isoformat() if row.timestamp else None,
         "subject": row.subject,
+        "password": row.password,
         "target": row.target,
         "status": row.status,
         "ip": row.ip,

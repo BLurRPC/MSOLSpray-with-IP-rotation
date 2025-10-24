@@ -159,17 +159,11 @@ def print_rows(rows):
         print(f"id        : {r.get('id')}")
         print(f"timestamp : {r.get('timestamp')}")
         print(f"subject   : {r.get('subject')}")
+        print(f"password   : {r.get('password')}")
         print(f"target    : {r.get('target')}")
         print(f"status    : {r.get('status')}")
         print(f"run_id    : {r.get('run_id')}")
-        print("details   :")
-        # indente les détails multi-lignes si présents
-        details = r.get('details')
-        if details:
-            for line in str(details).splitlines():
-                print(f"  {line}")
-        else:
-            print("  (none)")
+        print(f"details   : {r.get('details')}")
     print("=" * 60)
 
 
