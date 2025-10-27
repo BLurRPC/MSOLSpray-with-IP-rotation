@@ -8,6 +8,7 @@ import requests
 from requests.exceptions import RequestException, Timeout as RequestsTimeout
 from colorlog import ColoredFormatter
 from nordvpn_switcher import initialize_VPN, rotate_VPN, terminate_VPN
+from random import randint
 
 # --- DB imports (SQLAlchemy) ---
 from pathlib import Path
@@ -154,6 +155,52 @@ def excptn(e):
         print("[!]Exception: " + str(e), file=sys.stderr)
     exit(1)
 
+
+def _load_list_file(path: str) -> List[str]:
+    """
+    Helper interne.
+    Lit un fichier texte ligne par ligne (UTF-8),
+    strip() chaque ligne, ignore les lignes vides,
+    et retourne une liste en préservant l'ordre d'origine
+    sans doublons successifs.
+    """
+    seen = set()
+    ordered = []
+    with open(path, "r", encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line:
+                # ignore lignes vides
+                continue
+            if line not in seen:
+                seen.add(line)
+                ordered.append(line)
+    return ordered
+
+
+def userlist(path: str) -> List[str]:
+    """
+    Retourne la liste nettoyée des utilisateurs.
+    """
+    return _load_list_file(path)
+
+
+def passwordlist(path: str) -> List[str]:
+    """
+    Retourne la liste nettoyée des mots de passe.
+    """
+    return _load_list_file(path)
+
+
+def targetlist(path: str) -> List[str]:
+    """
+    Retourne la liste nettoyée des cibles.
+    """
+    return _load_list_file(path)
+    
+def random_time(minimum, maximum):
+    sleep_amount = randint(minimum, maximum)
+    return sleep_amount
 
 # ==========================
 # Local DB (SQLite) helpers

