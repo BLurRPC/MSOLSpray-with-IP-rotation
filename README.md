@@ -15,7 +15,7 @@ pip3 install -r requirements.txt
 ## Managed tenant
 ### Usage
 ```bash
-sudo python3 MSOLSpray.py -U '<path/to/mail/file>' -s 2 -p '<pass>' --vpn --vpn-area "France,Germany,Netherlands,United Kingdom" --ignore-success --skip-tested
+sudo python3 VPNspray.py -U users.txt -r 1 5 -p 'Winter2020*' --skip-tested --ignore-success --vpn --vpn-area "France,Germany,Netherlands,United Kingdom" msol
 ```
 * **--vpn**: Use NordVPN to rotate IP.
 * **--vpn-area**: Specify NordVPN region(s), uses `Europe` by default.
@@ -25,8 +25,9 @@ sudo python3 MSOLSpray.py -U '<path/to/mail/file>' -s 2 -p '<pass>' --vpn --vpn-
 ## ADFS
 ### Usage
 ```bash
-sudo python3 ADFSpray.py -U '<path/to/mail/file>' -r 1 3 -p '<pass>' -t https://<adfs.tenant.com> adfs --vpn --vpn-area "France,Germany,Netherlands,United Kingdom" --ignore-success --skip-tested
+sudo python3 VPNspray.py -U users.txt -s 3 -p 'Winter2020*' -t https://adfs.example.com --skip-tested --ignore-success --vpn --vpn-area "France" adfs
 ```
+* **-t**: ADFS target URL.
 * **--vpn**: Use NordVPN to rotate IP.
 * **--vpn-area**: Specify NordVPN region(s), uses `Europe` by default.
 * **--ignore-success**: Do not test users already pwned.
@@ -70,8 +71,4 @@ sudo python3 db_admin.py --purge 60
 ```
 
 # Roadmap
-- Adding countries for NordVPN as an option ✅
-- Adding local DB as an option to:
-    - Skip users with a known password ✅
-    - Skip users when the password tried has already been tried before ✅
 - Add an option for user:password wordlists (leaks)

