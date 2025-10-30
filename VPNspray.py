@@ -48,6 +48,7 @@ def args_parse():
 
 def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, vpn_area, vpn_tries_per_ip, initial_ip, skip_tested, ignore_success, userAsPass, force):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
+    skiped_username_counter = 0
     username_counter = 0
     prev_ip = initial_ip
     lockout_counter = 0
@@ -67,6 +68,7 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                         already = False  # en cas d'erreur, on choisit de ne pas bloquer le flux
                     if already:
                         LOGGER.info(f"[SKIP] {username} already pwned — skipping.")
+                        skiped_username_counter += 1
                         continue
                     
                 if skip_tested:
@@ -77,6 +79,7 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                         already = False  # en cas d'erreur, on choisit de ne pas bloquer le flux
                     if already:
                         LOGGER.info(f"[SKIP] {username}:{password} already tested — skipping.")
+                        skiped_username_counter += 1
                         continue
                 
                 if vpn and username_counter % vpn_tries_per_ip == 0:
@@ -170,7 +173,7 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                     time.sleep(float(sleep_time))
 
                 username_counter += 1
-                LOGGER.info(f"{username_counter} of {total_attempts} users tested")
+                LOGGER.info(f"{username_counter} of {total_attempts} users tested, {skiped_username_counter} skipped.")
 
                 # If the force flag isn't set and lockout count is 10 we'll ask if the user is sure they want to keep spraying
                 if not force and lockout_counter == 10 and lockout_question == False:
@@ -189,12 +192,13 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                         break
 
                     # else: continue even though lockout is detected
-    LOGGER.info("[*] Overall compromised accounts: %s" % working_creds_counter)
+    LOGGER.info(f"[*] Overall compromised accounts: {working_creds_counter} out of {total_attempts - skiped_username_counter} tries, {skiped_username_counter} skipped.")
     LOGGER.info("[*] Finished running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
 
 
 def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, vpn_area, vpn_tries_per_ip, initial_ip, skip_tested, ignore_success, userAsPass):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
+    skiped_username_counter = 0
     username_counter = 0
     prev_ip = initial_ip
     total_attempts = len(usernames) * len(usernames if userAsPass else passwords) * len(targets)
@@ -214,6 +218,7 @@ def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                             already = False  # en cas d'erreur, on choisit de ne pas bloquer le flux
                         if already:
                             LOGGER.info(f"[SKIP] {username} already pwned — skipping.")
+                            skiped_username_counter += 1
                             continue
                     
                     if skip_tested:
@@ -224,6 +229,7 @@ def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                             already = False  # en cas d'erreur, on choisit de ne pas bloquer le flux
                         if already:
                             LOGGER.info(f"[SKIP] {username}:{password} already tested — skipping.")
+                            skiped_username_counter += 1
                             continue  # passe au suivant
 
                     if vpn and username_counter % vpn_tries_per_ip == 0:
@@ -271,9 +277,9 @@ def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                     else:
                         time.sleep(float(sleep_time))
                     username_counter += 1
-                    LOGGER.info(f"{username_counter} of {total_attempts} users tested")
+                    LOGGER.info(f"{username_counter} of {total_attempts} users tested, {skiped_username_counter} skipped.")
 
-        LOGGER.info("[*] Overall compromised accounts: %s" % working_creds_counter)
+        LOGGER.info(f"[*] Overall compromised accounts: {working_creds_counter} out of {total_attempts - skiped_username_counter} tries, {skiped_username_counter} skipped.")
         LOGGER.info("[*] Finished running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
 
     except TimeoutError:
