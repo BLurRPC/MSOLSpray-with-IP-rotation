@@ -173,7 +173,7 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                     time.sleep(float(sleep_time))
 
                 username_counter += 1
-                LOGGER.info(f"{username_counter} of {total_attempts} users tested, {skiped_username_counter} skipped.")
+                LOGGER.info(f"{username_counter} of {total_attempts - skiped_username_counter} users tested, {skiped_username_counter} skipped.")
 
                 # If the force flag isn't set and lockout count is 10 we'll ask if the user is sure they want to keep spraying
                 if not force and lockout_counter == 10 and lockout_question == False:
@@ -277,7 +277,7 @@ def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                     else:
                         time.sleep(float(sleep_time))
                     username_counter += 1
-                    LOGGER.info(f"{username_counter} of {total_attempts} users tested, {skiped_username_counter} skipped.")
+                    LOGGER.info(f"{username_counter} of {total_attempts - skiped_username_counter} users tested, {skiped_username_counter} skipped.")
 
         LOGGER.info(f"[*] Overall compromised accounts: {working_creds_counter} out of {total_attempts - skiped_username_counter} tries, {skiped_username_counter} skipped.")
         LOGGER.info("[*] Finished running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
