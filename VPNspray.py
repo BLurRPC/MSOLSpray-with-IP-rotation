@@ -54,7 +54,8 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
     prev_ip = initial_ip
     lockout_counter = 0
     lockout_question = False
-    total_attempts = len(usernames) * len(targets) * 1 if (userAsPass or userPass) else len(passwords)
+    total_passwords = 1 if (userAsPass or userPass) else len(passwords)
+    total_attempts = len(usernames) * len(targets) * total_passwords
 
     for target in targets:
         for username in usernames:
@@ -205,7 +206,8 @@ def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
     skiped_username_counter = 0
     username_counter = 0
     prev_ip = initial_ip
-    total_attempts = len(usernames) * len(targets) * 1 if (userAsPass or userPass) else len(passwords)
+    total_passwords = 1 if (userAsPass or userPass) else len(passwords)
+    total_attempts = len(usernames) * len(targets) * total_passwords
 
     try:
         LOGGER.info("[*] Started running at: %s" % datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S'))
@@ -348,7 +350,7 @@ def main():
         targets = ["https://login.microsoft.com"]
 
     total_accounts = len(usernames)
-    total_passwords = len(usernames if (args.userAsPass or args.userPass) else passwords)
+    total_passwords = 1 if (args.userAsPass or args.userPass) else len(passwords)
     total_targets = len(targets)
     total_attempts = total_accounts * total_passwords * total_targets
     LOGGER.info("Total number of users to test: %s" % str(total_accounts))
