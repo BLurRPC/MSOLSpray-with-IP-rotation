@@ -69,6 +69,3 @@ sudo python3 db_admin.py --export out.csv --limit 500
 ```bash
 sudo python3 db_admin.py --purge 60
 ```
-
-# Roadmap
-- Add an option for user:password wordlists (leaks)
