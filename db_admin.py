@@ -128,13 +128,13 @@ def parse_since(since_str: Optional[str]) -> Optional[datetime.datetime]:
     if not since_str:
         return None
 
-    # Essai format complet ISO-like
+    # Date format ISO-like
     try:
         return datetime.datetime.fromisoformat(since_str)
     except ValueError:
         pass
 
-    # Essai date seule YYYY-MM-DD
+    # Date format YYYY-MM-DD
     try:
         return datetime.datetime.strptime(since_str, "%Y-%m-%d")
     except ValueError:
@@ -146,14 +146,13 @@ def parse_since(since_str: Optional[str]) -> Optional[datetime.datetime]:
 
 def print_rows(rows):
     """
-    Affichage console propre des résultats.
-    rows = liste de dicts {id, timestamp, subject, target, status, details, run_id}
+    Console result
+    rows = Dict list {id, timestamp, subject, target, status, details, run_id, ip}
     """
     if not rows:
-        print("(aucun résultat)")
+        print("(No results)")
         return
-
-    # petit rendu style tableau texte
+        
     for r in rows:
         print("=" * 60)
         print(f"id        : {r.get('id')}")
@@ -164,6 +163,7 @@ def print_rows(rows):
         print(f"status    : {r.get('status')}")
         print(f"run_id    : {r.get('run_id')}")
         print(f"details   : {r.get('details')}")
+        print(f"ip        : {r.get('ip')}")
     print("=" * 60)
 
 
@@ -172,21 +172,18 @@ def main():
     print(args)
 
     LOGGER = configure_logger(verbose=args.verbose, logfile_prefix="DBADMIN")
-
-    # Init DB (toujours) pour avoir une session, puis on agira selon les flags
     init_db(args.db, echo=False)
 
-    # 1. --init seul => on sort après init
     if args.init and not (args.list_success or args.list_fail or args.print_valid_users or args.query or args.export or args.purge):
         LOGGER.info(f"DB initialisée à {args.db}")
         return
 
-    # 2. purge si demandé
+    # purge (dangerous)
     if args.purge is not None:
         deleted = purge_older_than(days=args.purge)
         LOGGER.info(f"Purge: {deleted} lignes supprimées (> {args.purge} jours).")
 
-    # 3. list-success
+    # list-success
     if args.list_success:
         rows = get_successful_events(
             limit=args.limit,
@@ -194,7 +191,7 @@ def main():
         )
         print_rows(rows)
 
-    # 3bis. list-fail
+    # list-fail
     if args.list_fail:
         rows = get_failed_events(
             limit=args.limit,
@@ -202,7 +199,7 @@ def main():
         )
         print_rows(rows)
 
-    # 3ter. print_valid_users
+    # print_valid_users
     if args.print_valid_users:
         rows = print_valid_users(
             limit=args.limit,
@@ -210,7 +207,7 @@ def main():
         )
         print_rows(rows)
 
-    # 4. requête custom
+    # custom requests
     if args.query:
         try:
             since_dt = parse_since(args.since)
@@ -227,18 +224,14 @@ def main():
         )
         print_rows(rows)
 
-    # 5. export CSV
+    # CSV export
     if args.export:
-        # si l'utilisateur a fait --query, on peut réutiliser ces résultats.
-        # Pour garder ça simple, on refait une requête.
         try:
             since_dt = parse_since(args.since)
         except ValueError as e:
             LOGGER.error(str(e))
             sys.exit(1)
 
-        # Si l'utilisateur a passé --query, on respecte les mêmes filtres dans l'export.
-        # Sinon, on exporte les derniers "query_limit" (limit ~ args.limit).
         if args.query:
             rows = query_events(
                 status=args.status,
@@ -249,7 +242,6 @@ def main():
             )
             out_path = export_csv(path=args.export, rows=rows)
         else:
-            # export_csv sait interroger tout seul si rows=None
             out_path = export_csv(path=args.export, rows=None, query_limit=args.limit)
 
         LOGGER.info(f"Export CSV terminé -> {out_path}")
