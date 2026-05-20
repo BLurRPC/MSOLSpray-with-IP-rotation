@@ -1,4 +1,4 @@
-nordvpn-switcher
+nordvpn-switcher @ git+https://github.com/BLurRPC/NordVPN-switcher.git
 requests
 argparse
 colorlog
