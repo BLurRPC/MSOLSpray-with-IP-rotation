@@ -6,6 +6,8 @@ import socket
 import csv
 import requests
 from requests.exceptions import RequestException, Timeout as RequestsTimeout
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from colorlog import ColoredFormatter
 from nordvpn_switcher import initialize_VPN, rotate_VPN, terminate_VPN
 from random import randint, choice
@@ -103,7 +105,7 @@ def safe_rotate_vpn(area, prev_ip=None, rotate_retries=3, wait_initial=2, ip_che
         # Petit délai pour que la connexion VPN s'établisse
         time.sleep(backoff)
 
-        new_ip = get_public_ip(timeout=ip_check_timeout, retries=1)
+        new_ip = get_public_ip(timeout=ip_check_timeout, retries=2)
         if LOGGER:
             LOGGER.debug(f"[VPN] IP after rotate attempt {attempt}: {new_ip}")
 
@@ -149,21 +151,29 @@ def safe_rotate_vpn(area, prev_ip=None, rotate_retries=3, wait_initial=2, ip_che
 
 def make_session(random_ua: bool = False) -> requests.Session:
     USER_AGENTS = [
-    # Windows Chrome
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
-    # macOS Safari
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-    # Linux Firefox
-    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:129.0) Gecko/20100101 Firefox/129.0",
-    # Android Chrome
-    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:129.0) Gecko/20100101 Firefox/129.0",
+        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36",
     ]
+
     s = requests.Session()
+
+    retry = Retry(
+        total=2,                          # 2 tentatives max
+        backoff_factor=0.5,               # attend 0.5s, puis 1s entre les retries
+        allowed_methods=["GET", "POST"],  # méthodes concernées
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+
     ua = choice(USER_AGENTS) if random_ua else USER_AGENTS[0]
     s.headers.update({
         "User-Agent": ua,
         "Accept-Language": "en-US,en;q=0.9"
     })
+
     return s
 
 def excptn(e):
