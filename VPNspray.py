@@ -138,13 +138,13 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                     elif "AADSTS50079" in error or "AADSTS50076" in error:
                         # Microsoft MFA response
                         LOGGER.info(f"SUCCESS! {username} : {password} - NOTE: The response indicates MFA (Microsoft) is in use.")
-                        log_event(subject=username, password=password, target=target, status="success",  ip=ip, details="The response indicates MFA (Microsoft) is in use.")
+                        log_event(subject=username, password=password, target=target, status="success",  ip=ip, details=error)
                         working_creds_counter += 1
                         
                     elif "AADSTS50158" or "AADSTS53003" in error:
                         # Conditional Access response (Based off of limited testing this seems to be the response to DUO MFA)
                         LOGGER.info(f"SUCCESS! {username} : {password} - NOTE: The response indicates conditional access (MFA: DUO or other) is in use.")
-                        log_event(subject=username, password=password, target=target, status="success",  ip=ip, details="The response indicates conditional access (MFA: DUO or other) is in use.")
+                        log_event(subject=username, password=password, target=target, status="success",  ip=ip, details=error)
                         working_creds_counter += 1
                         
                     elif "AADSTS50053" in error:
@@ -167,7 +167,7 @@ def msol_attempts(usernames, passwords, targets, sleep_time, random, min_sleep, 
                     else:
                         # Unknown errors
                         LOGGER.error(f"Got an error we haven't seen yet for user {username}")
-                        log_event(subject=username, password=password, target=target, status="fail",  ip=ip, details="Got an error we haven't seen yet for user.")
+                        log_event(subject=username, password=password, target=target, status="fail",  ip=ip, details=error)
                         LOGGER.error(error)
                 session.close()
 
